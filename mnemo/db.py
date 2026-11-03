@@ -1,0 +1,109 @@
+import sqlite3
+import json
+import uuid
+from datetime import datetime
+
+class Database:
+    def __init__(self, db_path="mnemo.db"):
+        self.db_path = db_path
+        self._init_db()
+
+    def _get_conn(self):
+        return sqlite3.connect(self.db_path)
+
+    def _init_db(self):
+        with self._get_conn() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS episodes (
+                    id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    metadata JSON
+                );
+                CREATE TABLE IF NOT EXISTS nodes (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    node_type TEXT,
+                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS edges (
+                    id TEXT PRIMARY KEY,
+                    source_id TEXT REFERENCES nodes(id),
+                    target_id TEXT REFERENCES nodes(id),
+                    relation TEXT NOT NULL DEFAULT 'co_occurs',
+                    weight REAL DEFAULT 1.0,
+                    last_reinforced DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source_id, target_id, relation)
+                );
+            """)
+
+    def add_episode(self, content: str, metadata: dict = None) -> str:
+        ep_id = str(uuid.uuid4())
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT INTO episodes (id, content, metadata) VALUES (?, ?, ?)",
+                (ep_id, content, json.dumps(metadata or {}))
+            )
+        return ep_id
+
+    def get_recent_episodes(self, limit=50) -> list:
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "SELECT id, content FROM episodes ORDER BY timestamp DESC LIMIT ?", 
+                (limit,)
+            )
+            return [{"id": row[0], "content": row[1]} for row in cursor.fetchall()]
+
+    def get_or_create_node(self, name: str, node_type: str = "entity") -> str:
+        name = name.lower().strip()
+        with self._get_conn() as conn:
+            cursor = conn.execute("SELECT id FROM nodes WHERE name = ?", (name,))
+            row = cursor.fetchone()
+            if row:
+                conn.execute("UPDATE nodes SET last_seen = CURRENT_TIMESTAMP WHERE id = ?", (row[0],))
+                return row[0]
+            
+            node_id = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO nodes (id, name, node_type) VALUES (?, ?, ?)",
+                (node_id, name, node_type)
+            )
+            return node_id
+
+    def reinforce_edge(self, source_id: str, target_id: str, relation: str = "co_occurs"):
+        if source_id == target_id:
+            return
+        
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "SELECT id FROM edges WHERE source_id = ? AND target_id = ? AND relation = ?",
+                (source_id, target_id, relation)
+            )
+            row = cursor.fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE edges SET weight = weight + 1.0, last_reinforced = CURRENT_TIMESTAMP WHERE id = ?",
+                    (row[0],)
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO edges (id, source_id, target_id, relation) VALUES (?, ?, ?, ?)",
+                    (str(uuid.uuid4()), source_id, target_id, relation)
+                )
+
+    def get_graph_context(self, node_name: str, depth=1) -> list:
+        """Returns the node’s connections in the graph."""
+        node_name = node_name.lower().strip()
+        with self._get_conn() as conn:
+            cursor = conn.execute("""
+                SELECT n1.name, e.relation, n2.name, e.weight
+                FROM edges e
+                JOIN nodes n1 ON e.source_id = n1.id
+                JOIN nodes n2 ON e.target_id = n2.id
+                WHERE n1.name = ? OR n2.name = ?
+                ORDER BY e.weight DESC LIMIT 20
+            """, (node_name, node_name))
+            return [
+                {"source": row[0], "relation": row[1], "target": row[2], "weight": row[3]} 
+                for row in cursor.fetchall()
+            ]

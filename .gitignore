@@ -7,11 +7,16 @@ env/
 .env
 # Python
 __pycache__/
+pycache/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
+*.pyc
 .ruff_cache/
 build/
 dist/
 *.so
+# Data
+chroma_db/
+test_chroma/

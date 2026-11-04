@@ -25,3 +25,5 @@ test_decay
 test_mnemo
 mnemo_mcp_chroma
 *.db
+*.sqlite
+*_chroma/

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mnemo"
+version = "0.1.0"
+description = "Local-first cognitive memory for AI agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "vdeem"}]
+dependencies = [
+    "chromadb",
+    "sentence-transformers",
+    "spacy",
+    "scikit-learn",
+    "networkx",
+    "mcp",
+]
+
+[project.urls]
+Homepage = "https://github.com/vdeem/mnemo"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mnemo*"]

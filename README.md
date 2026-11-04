@@ -61,7 +61,7 @@ print(results["facts"])     # Graph relations (Bob -> pytorch)
 - [x] Core memory engine (episodic + semantic)
 - [x] Zero-LLM consolidation
 - [x] Decay & forgetting algorithm
-- [ ] MCP (Model Context Protocol) server
+- [x] MCP (Model Context Protocol) server
 - [ ] Multi-language SpaCy support
 
 ## License

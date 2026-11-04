@@ -23,4 +23,5 @@ test_chroma/
 test_chroma_decay
 test_decay
 test_mnemo
+mnemo_mcp_chroma
 *.db

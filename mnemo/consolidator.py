@@ -1,18 +1,25 @@
 import spacy
+from spacy.cli import download as spacy_download
 from sklearn.cluster import DBSCAN
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
 class Consolidator:
     def __init__(self, model_name="all-MiniLM-L6-v2"):
-        # Loading spaCy to extract entities.
+        spacy_model = "en_core_web_sm"
         try:
-            self.nlp = spacy.load("en_core_web_sm")
+            self.nlp = spacy.load(spacy_model)
         except OSError:
-            raise RuntimeError("Run: python -m spacy download en_core_web_sm")
+            print(f"Downloading spaCy model '{spacy_model}'...")
+            try:
+                spacy_download(spacy_model)
+                self.nlp = spacy.load(spacy_model)
+            except Exception as e:
+                print(f"Failed to auto-install. Please run: python -m spacy download {spacy_model}")
+                raise e
         
         self.encoder = SentenceTransformer(model_name)
-
+        
     def extract_entities(self, text: str) -> list:
         """Extracts named entities and nouns."""
         doc = self.nlp(text)

@@ -18,6 +18,7 @@ Mnemo takes a different approach: **cognitive consolidation**. It uses clusterin
 - **Hybrid Retrieval** — Combines vector similarity (episodic memory) with graph traversal (semantic memory).
 - **Local-First** — SQLite and ChromaDB on your disk.
 - **Lightweight** — Runs on consumer hardware, no GPU required.
+- **Forgetting (Decay)**: Old, unreinforced connections fade away and are archived, preventing database bloat and keeping only the most relevant memories.
 
 ## Installation
 
@@ -59,7 +60,7 @@ print(results["facts"])     # Graph relations (Bob -> pytorch)
 
 - [x] Core memory engine (episodic + semantic)
 - [x] Zero-LLM consolidation
-- [ ] Decay & forgetting algorithm
+- [x] Decay & forgetting algorithm
 - [ ] MCP (Model Context Protocol) server
 - [ ] Multi-language SpaCy support
 

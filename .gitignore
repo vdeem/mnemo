@@ -20,3 +20,5 @@ dist/
 # Data
 chroma_db/
 test_chroma/
+test_chroma_decay
+test_decay

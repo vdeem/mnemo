@@ -20,6 +20,15 @@ class Mnemo:
         if not episodes:
             return 0
         return self.consolidator.consolidate(episodes, self.db)
+    
+    def decay(self, decay_rate: float = 0.1, threshold: float = 0.05):
+        """
+        Starts the forgetting process. Call once a day (or on shutdown).
+
+        :param decay_rate: How quickly relationships are forgotten (0.1 = 10% per day).
+        :param threshold: Deletion threshold.
+        """
+        return self.db.decay_edges(decay_rate=decay_rate, threshold=threshold)
 
     def recall(self, query: str, k=5) -> dict:
         """

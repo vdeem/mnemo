@@ -60,5 +60,59 @@ def main():
     for fact in res3["facts"][:5]:
         print(f"  - {fact['source']} -> {fact['relation']} -> {fact['target']} (Weight: {fact['weight']})")
 
+def test_decay():
+    """Test that old memories fade away."""
+    print("\n=== Testing Decay (Forgetting) ===")
+    
+    # Use a fresh database
+    import os
+    for f in ["test_decay.db"]:
+        if os.path.exists(f):
+            os.remove(f)
+    
+    from mnemo.core import Mnemo
+    import time
+    
+    mnemo = Mnemo(db_path="test_decay.db", chroma_path="./test_chroma_decay")
+    
+    print("Adding episodes...")
+    mnemo.add("The user loves chocolate ice cream.")
+    mnemo.add("The user hates rainy weather.")
+    mnemo.add("The user is learning to play the guitar.")
+    
+    time.sleep(1)
+    mnemo.consolidate()
+    
+    # Check current weight
+    print("\nBefore decay:")
+    facts = mnemo.recall("What does the user love?")["facts"]
+    for f in facts[:5]:
+        print(f"  {f['source']} -> {f['relation']} -> {f['target']} (weight={f['weight']})")
+    
+    # Manually set last_reinforced to 30 days ago to simulate aging
+    import sqlite3
+    from datetime import datetime, timedelta
+    old_date = (datetime.now() - timedelta(days=30)).isoformat()
+    
+    conn = sqlite3.connect("test_decay.db")
+    conn.execute("UPDATE edges SET last_reinforced = ?", (old_date,))
+    conn.commit()
+    conn.close()
+    
+    # Run decay
+    print("\nRunning decay (simulating 30 days)...")
+    affected = mnemo.decay(decay_rate=0.1, threshold=0.05)
+    print(f"Affected edges: {affected}")
+    
+    # Check after decay
+    print("\nAfter decay:")
+    facts = mnemo.recall("What does the user love?")["facts"]
+    if not facts:
+        print("  (all facts faded away — perfect for testing!)")
+    else:
+        for f in facts[:5]:
+            print(f"  {f['source']} -> {f['relation']} -> {f['target']} (weight={f['weight']:.2f})")
+
 if __name__ == "__main__":
     main()
+    test_decay()

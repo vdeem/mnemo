@@ -11,6 +11,74 @@ class Database:
     def _get_conn(self):
         return sqlite3.connect(self.db_path)
 
+    def decay_edges(self, decay_rate: float = 0.1, threshold: float = 0.05, archive: bool = True):
+        """
+        Reduces the weight of edges that haven’t been reinforced recently.
+
+        :param decay_rate: Forgetting rate (fraction of weight lost per day).
+        :param threshold: The threshold below which an edge is considered “dead.”
+        :param archive: If True, edges are moved to the archive instead of being deleted.
+        :return: The number of edges affected.
+        """
+        import math
+        from datetime import datetime
+
+        # Get the current time
+        now = datetime.now()
+
+        with self._get_conn() as conn:
+            # Get all edges and their last_reinforced timestamps
+            cursor = conn.execute("SELECT id, weight, last_reinforced FROM edges")
+            edges = cursor.fetchall()
+
+            affected = 0
+            for edge_id, weight, last_reinforced_str in edges:
+                # Parse the timestamp (SQLite stores it as a string)
+                try:
+                    last_reinforced = datetime.fromisoformat(last_reinforced_str)
+                except (ValueError, TypeError):
+                    last_reinforced = now  # If parsing fails, assume it was reinforced just now
+
+                # Calculate how many days have passed
+                days_passed = (now - last_reinforced).total_seconds() / 86400.0
+
+                # Exponential decay: new_weight = weight * exp(-decay_rate * days)
+                new_weight = weight * math.exp(-decay_rate * days_passed)
+
+                if new_weight < threshold:
+                    # The edge has "died"
+                    if archive:
+                        # Move it to the archive (create the table if it doesn't exist)
+                        conn.execute("""
+                            CREATE TABLE IF NOT EXISTS edges_archive (
+                                id TEXT PRIMARY KEY,
+                                source_id TEXT,
+                                target_id TEXT,
+                                relation TEXT,
+                                weight REAL,
+                                last_reinforced DATETIME
+                            )
+                        """)
+                        # Copy the edge to the archive
+                        conn.execute(
+                            "INSERT OR REPLACE INTO edges_archive SELECT * FROM edges WHERE id = ?",
+                            (edge_id,)
+                        )
+                    # Delete the edge from the main table
+                    conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
+                    affected += 1
+                else:
+                    # Just update the weight
+                    if abs(new_weight - weight) > 0.001:  # Update only if the change is significant
+                        conn.execute(
+                            "UPDATE edges SET weight = ? WHERE id = ?",
+                            (new_weight, edge_id)
+                        )
+                        affected += 1
+
+            
+            return affected
+
     def _init_db(self):
         with self._get_conn() as conn:
             conn.executescript("""
@@ -96,7 +164,7 @@ class Database:
         node_name = node_name.lower().strip()
         with self._get_conn() as conn:
             cursor = conn.execute("""
-                SELECT n1.name, e.relation, n2.name, e.weight
+                SELECT DISTINCT n1.name, e.relation, n2.name, e.weight
                 FROM edges e
                 JOIN nodes n1 ON e.source_id = n1.id
                 JOIN nodes n2 ON e.target_id = n2.id

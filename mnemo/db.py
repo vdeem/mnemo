@@ -85,6 +85,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS episodes (
                     id TEXT PRIMARY KEY,
                     content TEXT NOT NULL,
+                    salience REAL DEFAULT 0.5,  -- NEW: how vivid is this memory?
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                     metadata JSON
                 );
@@ -105,12 +106,17 @@ class Database:
                 );
             """)
 
-    def add_episode(self, content: str, metadata: dict = None) -> str:
-        ep_id = str(uuid.uuid4())
+    def add_episode(self, content: str, metadata: dict = None, salience: float = 0.5) -> str:
         with self._get_conn() as conn:
+            cursor = conn.execute("SELECT id FROM episodes WHERE content = ?", (content,))
+            row = cursor.fetchone()
+            if row:
+                return row[0]
+            
+            ep_id = str(uuid.uuid4())
             conn.execute(
-                "INSERT INTO episodes (id, content, metadata) VALUES (?, ?, ?)",
-                (ep_id, content, json.dumps(metadata or {}))
+                "INSERT INTO episodes (id, content, salience, metadata) VALUES (?, ?, ?, ?)",
+                (ep_id, content, salience, json.dumps(metadata or {}))
             )
         return ep_id
 
@@ -175,3 +181,18 @@ class Database:
                 {"source": row[0], "relation": row[1], "target": row[2], "weight": row[3]} 
                 for row in cursor.fetchall()
             ]
+        
+    def get_episode_details(self, ids: list) -> dict:
+        """Fetch salience and metadata for a list of episode IDs."""
+        if not ids:
+            return {}
+        placeholders = ','.join('?' * len(ids))
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                f"SELECT id, salience, metadata FROM episodes WHERE id IN ({placeholders})", 
+                ids
+            )
+            return {
+                row[0]: {"salience": row[1], "metadata": json.loads(row[2])} 
+                for row in cursor.fetchall()
+            }

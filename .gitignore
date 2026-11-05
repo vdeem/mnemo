@@ -26,4 +26,6 @@ test_mnemo
 mnemo_mcp_chroma
 *.db
 *.sqlite
+*.sqlite3
 *_chroma/
+test_chroma_triples

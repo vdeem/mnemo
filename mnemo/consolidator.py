@@ -41,9 +41,8 @@ class Consolidator:
 
     def consolidate(self, episodes: list, db) -> int:
         """
-        Takes a list of episodes, clusters them, 
-        extracts relationships, and updates the graph in the database. 
-        Returns the number of processed episodes.
+        Takes a list of episodes, clusters them, extracts relations, 
+        and updates the knowledge graph.
         """
         if not episodes:
             return 0
@@ -52,7 +51,6 @@ class Consolidator:
         
         # 1. Clustering
         embeddings = self.encoder.encode(texts)
-        # DBSCAN: eps is the maximum distance between neighboring points; min_samples is the minimum cluster size.
         clustering = DBSCAN(eps=0.5, min_samples=2, metric="cosine").fit(embeddings)
         labels = clustering.labels_
 
@@ -61,21 +59,85 @@ class Consolidator:
         for idx, label in enumerate(labels):
             text = texts[idx]
             
-            # Even if it’s noise (-1), we still need its entities
+            # A. Extract entities and create nodes
             entities = self.extract_entities(text)
-            if not entities:
-                continue
-                
-            # Creating nodes in the database
             node_ids = []
             for ent in entities:
                 node_ids.append(db.get_or_create_node(ent))
                 
-            # Connecting all entities to one another (co-occurrence)
+            # B. Co-occurrence edges (for implicit connections)
             for i in range(len(node_ids)):
                 for j in range(i + 1, len(node_ids)):
-                    db.reinforce_edge(node_ids[i], node_ids[j])
+                    db.reinforce_edge(node_ids[i], node_ids[j], relation="co_occurs")
+            
+            # C. Typed triples (for explicit connections)
+            triples = self.extract_triples(text)
+            for subj, pred, obj in triples:
+                subj_id = db.get_or_create_node(subj)
+                obj_id = db.get_or_create_node(obj)
+                db.reinforce_edge(subj_id, obj_id, relation=pred)
             
             processed += 1
 
         return processed
+
+    def extract_triples(self, text: str) -> list[tuple[str, str, str]]:
+        """
+        Extracts (subject, predicate, object) triples using SpaCy dependency parsing.
+        Examples:
+          "Jack is a dog" -> ("jack", "is_a", "dog")
+          "user won a lottery" -> ("user", "won", "lottery")
+        """
+        doc = self.nlp(text)
+        triples = []
+
+        for token in doc:
+            # 1. Subject-Verb-Object (user won lottery)
+            if token.dep_ == "ROOT" and token.pos_ == "VERB":
+                subj = None
+                obj = None
+                for child in token.children:
+                    if child.dep_ in ("nsubj", "nsubjpass"):
+                        subj = child.text.lower()
+                    elif child.dep_ in ("dobj", "pobj"):
+                        obj = child.text.lower()
+                    # Handle prepositional objects (e.g., "won a lottery")
+                    elif child.dep_ == "prep":
+                        for p_child in child.children:
+                            if p_child.dep_ == "pobj":
+                                obj = p_child.text.lower()
+                
+                if subj and obj:
+                    # Transitive verb: Subject + Verb + Object
+                    triples.append((subj, token.lemma_.lower(), obj))
+                elif subj and not obj:
+                    # Intransitive verb: Subject + Verb (no object)
+                    # Build verb phrase including particles (e.g., "pass away", "wake up")
+                    verb_phrase = token.lemma_.lower()
+                    for child in token.children:
+                        if child.dep_ == "prt":
+                            verb_phrase = verb_phrase + "_" + child.text.lower()
+                    triples.append((subj, "did", verb_phrase))
+
+            # 2. Subject-Copula-Complement (Jack is a dog)
+            elif token.dep_ == "ROOT" and token.lemma_ == "be":
+                subj = None
+                comp = None
+                for child in token.children:
+                    if child.dep_ in ("nsubj", "nsubjpass"):
+                        subj = child.text.lower()
+                    elif child.dep_ in ("attr", "acomp"):
+                        # If it's a noun phrase, take the head noun
+                        comp = child.text.lower()
+                
+                if subj and comp:
+                    triples.append((subj, "is_a", comp))
+
+        # 3. Possessions (Users's dog)
+        for token in doc:
+            if token.dep_ == "poss":
+                subj = token.text.lower()
+                head = token.head.text.lower()
+                triples.append((subj, "has_a", head))
+
+        return list(set(triples))  # Remove duplicates

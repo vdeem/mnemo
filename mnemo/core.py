@@ -147,6 +147,14 @@ class Mnemo:
             "facts": graph_facts,
         }
 
+    def delete(self, ids: list) -> int:
+        """Delete episodes from SQLite and the vector index."""
+        if not ids:
+            return 0
+        deleted = self.db.delete_episodes(ids)
+        self.embedder.delete(ids)
+        return deleted
+
     def close(self):
         """Release Chroma handles (Windows keeps files locked otherwise)."""
         try:

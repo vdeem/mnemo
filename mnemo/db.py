@@ -230,6 +230,17 @@ class Database:
                 for row in cursor.fetchall()
             }
 
+    def delete_episodes(self, ids: list) -> int:
+        """Remove episodes by id; the vector index is cleaned separately."""
+        if not ids:
+            return 0
+        placeholders = ','.join('?' * len(ids))
+        with self._conn() as conn:
+            cursor = conn.execute(
+                f"DELETE FROM episodes WHERE id IN ({placeholders})", ids
+            )
+            return cursor.rowcount
+
     def all_episodes(self) -> list:
         """Every episode as {id, content}; used to rebuild the vector index."""
         with self._conn() as conn:

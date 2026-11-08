@@ -100,6 +100,11 @@ class Embedder:
             for i in range(len(ids))
         ]
 
+    def delete(self, ids: list):
+        if not ids:
+            return
+        self.collection.delete(ids=ids)
+
     def ensure_ids(self, episodes: list[dict]):
         """Backfill vectors for episodes missing from this collection.
 

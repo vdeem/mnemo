@@ -12,15 +12,45 @@ class Mnemo:
         self.db = Database(db_path)
         self.embedder = Embedder(db_path=chroma_path)
         self.consolidator = Consolidator()
+        self._last_duplicate_id: str | None = None
         # SQLite is the source of truth; Chroma is only a search index.
         # Backfills vectors after a model switch instead of losing old episodes.
         self.embedder.ensure_ids(self.db.all_episodes())
 
-    def add(self, text: str, metadata: dict = None, salience: float = 0.5):
-        """Add an episode. Salience (0-1) marks how emotionally vivid it is."""
+    def add(self, text: str, metadata: dict = None, salience: float = 0.5,
+            dedupe: bool = True):
+        """Add an episode. Salience (0-1) marks how emotionally vivid it is.
+
+        Near-duplicates are merged: the existing episode gets a salience bump
+        and a fresh timestamp instead of a second copy of the same fact.
+        """
+        existing = self.db.episode_id_for(text)
+        if existing:
+            self.db.reinforce_episode(existing)
+            return existing
+
+        if dedupe and self._is_near_duplicate(text):
+            return self._last_duplicate_id
+
         ep_id = self.db.add_episode(text, metadata, salience=salience)
         self.embedder.add(ids=[ep_id], documents=[text])
         return ep_id
+
+    def _is_near_duplicate(self, text: str) -> bool:
+        max_distance = float(os.getenv("MNEMO_DEDUPE_DISTANCE", "0.10"))
+        try:
+            similar = self.embedder.find_similar(text, k=1)
+        except Exception as e:
+            print(f"[mnemo] dedupe check failed: {e}")
+            return False
+        if not similar:
+            return False
+        best = similar[0]
+        if best.get("distance") is not None and best["distance"] <= max_distance:
+            self._last_duplicate_id = best["id"]
+            self.db.reinforce_episode(best["id"])
+            return True
+        return False
 
     def consolidate(self, limit=50):
         """Run “Sieve” (call once an hour or on exit)."""

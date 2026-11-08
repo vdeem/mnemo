@@ -73,6 +73,33 @@ class Embedder:
             for i in range(len(ids))
         ]
 
+    def find_similar(self, text: str, k: int = 1) -> list:
+        """Nearest existing episodes for a document (not a query).
+
+        Uses the same passage prefix as add(), so the comparison is
+        document-to-document and catches paraphrases of the same fact.
+        """
+        if self.collection.count() == 0:
+            return []
+        payload = [f"passage: {text}"] if _is_e5(self.model_name) else [text]
+        embedding = self.model.encode(payload, normalize_embeddings=True).tolist()
+        results = self.collection.query(
+            query_embeddings=embedding,
+            n_results=min(k, self.collection.count()),
+            include=["documents", "distances"],
+        )
+        ids = (results.get("ids") or [[]])[0]
+        documents = (results.get("documents") or [[]])[0]
+        distances = (results.get("distances") or [[]])[0]
+        return [
+            {
+                "id": ids[i],
+                "text": documents[i],
+                "distance": float(distances[i]) if i < len(distances) else None,
+            }
+            for i in range(len(ids))
+        ]
+
     def ensure_ids(self, episodes: list[dict]):
         """Backfill vectors for episodes missing from this collection.
 

@@ -131,6 +131,24 @@ class Database:
             )
         return ep_id
 
+    def episode_id_for(self, content: str) -> str | None:
+        """Exact-match lookup without inserting anything."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT id FROM episodes WHERE content = ?", (content,)
+            ).fetchone()
+            return row[0] if row else None
+
+    def reinforce_episode(self, ep_id: str, salience_step: float = 0.05) -> bool:
+        """The fact was repeated: bump salience and refresh recency."""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE episodes SET salience = MIN(1.0, salience + ?), "
+                "timestamp = CURRENT_TIMESTAMP WHERE id = ?",
+                (salience_step, ep_id),
+            )
+            return conn.total_changes > 0
+
     def get_recent_episodes(self, limit=50) -> list:
         with self._conn() as conn:
             cursor = conn.execute(

@@ -58,11 +58,13 @@ class Mnemo:
             score = base_score + (salience * 0.5)
             
             # Boost by emotional alignment (if current mood is provided)
+            # Вес 1.0 (как в Desktop-копии): при 0.5 один шаг ранга (0.5)
+            # перебивал максимальный бонус, и mood-congruent recall не работал.
             if current_valence is not None and "valence" in meta:
                 ep_valence = meta["valence"]
                 # Distance from -2 to 0. Closer to 0 = better.
                 valence_dist = abs(current_valence - ep_valence)
-                score += (1.0 - (valence_dist / 2.0)) * 0.5
+                score += (1.0 - (valence_dist / 2.0)) * 1.0
             
             scored_episodes.append((score, ep))
             

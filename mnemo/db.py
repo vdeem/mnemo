@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import uuid
+from contextlib import contextmanager
 from datetime import datetime
 
 class Database:
@@ -10,6 +11,16 @@ class Database:
 
     def _get_conn(self):
         return sqlite3.connect(self.db_path)
+
+    @contextmanager
+    def _conn(self):
+        """Open/commit/close explicitly: Windows keeps .db locked otherwise."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
 
     def decay_edges(self, decay_rate: float = 0.1, threshold: float = 0.05, archive: bool = True):
         """
@@ -26,7 +37,7 @@ class Database:
         # Get the current time
         now = datetime.now()
 
-        with self._get_conn() as conn:
+        with self._conn() as conn:
             # Get all edges and their last_reinforced timestamps
             cursor = conn.execute("SELECT id, weight, last_reinforced FROM edges")
             edges = cursor.fetchall()
@@ -80,7 +91,7 @@ class Database:
             return affected
 
     def _init_db(self):
-        with self._get_conn() as conn:
+        with self._conn() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS episodes (
                     id TEXT PRIMARY KEY,
@@ -107,7 +118,7 @@ class Database:
             """)
 
     def add_episode(self, content: str, metadata: dict = None, salience: float = 0.5) -> str:
-        with self._get_conn() as conn:
+        with self._conn() as conn:
             cursor = conn.execute("SELECT id FROM episodes WHERE content = ?", (content,))
             row = cursor.fetchone()
             if row:
@@ -121,7 +132,7 @@ class Database:
         return ep_id
 
     def get_recent_episodes(self, limit=50) -> list:
-        with self._get_conn() as conn:
+        with self._conn() as conn:
             cursor = conn.execute(
                 "SELECT id, content FROM episodes ORDER BY timestamp DESC LIMIT ?", 
                 (limit,)
@@ -130,7 +141,7 @@ class Database:
 
     def get_or_create_node(self, name: str, node_type: str = "entity") -> str:
         name = name.lower().strip()
-        with self._get_conn() as conn:
+        with self._conn() as conn:
             cursor = conn.execute("SELECT id FROM nodes WHERE name = ?", (name,))
             row = cursor.fetchone()
             if row:
@@ -148,7 +159,7 @@ class Database:
         if source_id == target_id:
             return
         
-        with self._get_conn() as conn:
+        with self._conn() as conn:
             cursor = conn.execute(
                 "SELECT id FROM edges WHERE source_id = ? AND target_id = ? AND relation = ?",
                 (source_id, target_id, relation)
@@ -168,7 +179,7 @@ class Database:
     def get_graph_context(self, node_name: str, depth=1) -> list:
         """Returns the node’s connections in the graph."""
         node_name = node_name.lower().strip()
-        with self._get_conn() as conn:
+        with self._conn() as conn:
             cursor = conn.execute("""
                 SELECT DISTINCT n1.name, e.relation, n2.name, e.weight
                 FROM edges e
@@ -183,16 +194,26 @@ class Database:
             ]
         
     def get_episode_details(self, ids: list) -> dict:
-        """Fetch salience and metadata for a list of episode IDs."""
+        """Fetch salience, metadata and timestamp for a list of episode IDs."""
         if not ids:
             return {}
         placeholders = ','.join('?' * len(ids))
-        with self._get_conn() as conn:
+        with self._conn() as conn:
             cursor = conn.execute(
-                f"SELECT id, salience, metadata FROM episodes WHERE id IN ({placeholders})", 
+                f"SELECT id, salience, metadata, timestamp FROM episodes WHERE id IN ({placeholders})",
                 ids
             )
             return {
-                row[0]: {"salience": row[1], "metadata": json.loads(row[2])} 
+                row[0]: {
+                    "salience": row[1],
+                    "metadata": json.loads(row[2]),
+                    "timestamp": row[3],
+                }
                 for row in cursor.fetchall()
             }
+
+    def all_episodes(self) -> list:
+        """Every episode as {id, content}; used to rebuild the vector index."""
+        with self._conn() as conn:
+            cursor = conn.execute("SELECT id, content FROM episodes")
+            return [{"id": row[0], "content": row[1]} for row in cursor.fetchall()]

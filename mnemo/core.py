@@ -1,12 +1,20 @@
+import math
+import os
+from datetime import datetime
+
+from .consolidator import Consolidator
 from .db import Database
 from .embedder import Embedder
-from .consolidator import Consolidator
+
 
 class Mnemo:
     def __init__(self, db_path="mnemo.db", chroma_path="./chroma_db"):
         self.db = Database(db_path)
         self.embedder = Embedder(db_path=chroma_path)
         self.consolidator = Consolidator()
+        # SQLite is the source of truth; Chroma is only a search index.
+        # Backfills vectors after a model switch instead of losing old episodes.
+        self.embedder.ensure_ids(self.db.all_episodes())
 
     def add(self, text: str, metadata: dict = None, salience: float = 0.5):
         """Add an episode. Salience (0-1) marks how emotionally vivid it is."""
@@ -20,7 +28,7 @@ class Mnemo:
         if not episodes:
             return 0
         return self.consolidator.consolidate(episodes, self.db)
-    
+
     def decay(self, decay_rate: float = 0.1, threshold: float = 0.05):
         """
         Starts the forgetting process. Call once a day (or on shutdown).
@@ -30,49 +38,75 @@ class Mnemo:
         """
         return self.db.decay_edges(decay_rate=decay_rate, threshold=threshold)
 
-    def recall(self, query: str, k=5, current_valence: float = None) -> dict:
+    def recall(
+        self,
+        query: str,
+        k=5,
+        current_valence: float = None,
+        max_distance: float = None,
+    ) -> dict:
+        """Hybrid recall: vector search, filtered and re-ranked.
+
+        Ranking is dominated by semantic similarity. Salience is only a small
+        tie-breaker, mood alignment is a moderate bonus, and recency decays.
+        Episodes farther than max_distance are dropped entirely, so "nothing
+        relevant" is a normal, honest answer instead of noise.
         """
-        Hybrid search: Vector + Graph + Emotional Reranking.
-        If current_valence is provided (-1 to 1), memories with similar emotional tone get boosted.
-        """
-        # 1. Fetch more episodes than needed (for reranking)
-        raw_episodes = self.embedder.search(query, k=k * 3)
-        
+        if max_distance is None:
+            max_distance = float(os.getenv("MNEMO_MAX_DISTANCE", "1.0"))
+
+        raw_episodes = self.embedder.search(query, k=max(k * 3, k))
         if not raw_episodes:
             return {"episodes": [], "facts": []}
 
-        # 2. Fetch salience and metadata from SQLite
-        ep_ids = [ep["id"] for ep in raw_episodes]
-        details = self.db.get_episode_details(ep_ids)
-        
-        scored_episodes = []
-        for i, ep in enumerate(raw_episodes):
-            det = details.get(ep["id"], {})
-            salience = det.get("salience", 0.5)
-            meta = det.get("metadata", {})
-            
-            # Base score: inverse rank from vector search (1st place = 1.0, 2nd = 0.9, etc.)
-            base_score = 1.0 - (i / len(raw_episodes)) 
-            
-            # Boost by salience (Amygdala tag)
-            score = base_score + (salience * 0.5)
-            
-            # Boost by emotional alignment (if current mood is provided)
-            # Вес 1.0 (как в Desktop-копии): при 0.5 один шаг ранга (0.5)
-            # перебивал максимальный бонус, и mood-congruent recall не работал.
-            if current_valence is not None and "valence" in meta:
-                ep_valence = meta["valence"]
-                # Distance from -2 to 0. Closer to 0 = better.
-                valence_dist = abs(current_valence - ep_valence)
-                score += (1.0 - (valence_dist / 2.0)) * 1.0
-            
-            scored_episodes.append((score, ep))
-            
-        # 3. Sort by final score and take top K
-        scored_episodes.sort(key=lambda x: x[0], reverse=True)
-        top_episodes = [ep for score, ep in scored_episodes[:k]]
+        details = self.db.get_episode_details([ep["id"] for ep in raw_episodes])
+        now = datetime.now()
 
-        # 4. Graph search (Spreading Activation)
+        scored_episodes = []
+        for ep in raw_episodes:
+            distance = ep.get("distance")
+            if distance is not None and distance > max_distance:
+                continue
+
+            det = details.get(ep["id"], {})
+            # Cosine distance is 0..2 for normalized vectors -> similarity 0..1.
+            similarity = max(0.0, 1.0 - (distance or 0.0) / 2.0)
+            salience = float(det.get("salience", 0.5))
+            meta = det.get("metadata") or {}
+
+            score = similarity
+            score += 0.10 * salience  # tie-breaker, not the driver
+
+            if current_valence is not None and "valence" in meta:
+                try:
+                    gap = abs(float(current_valence) - float(meta["valence"]))
+                    score += 0.25 * (1.0 - gap / 2.0)
+                except (TypeError, ValueError):
+                    pass
+
+            timestamp = det.get("timestamp")
+            if timestamp:
+                try:
+                    age_days = max(
+                        0.0,
+                        (now - datetime.fromisoformat(str(timestamp)))
+                        .total_seconds() / 86400.0,
+                    )
+                    score += 0.10 * math.exp(-age_days / 45.0)
+                except (TypeError, ValueError):
+                    pass
+
+            scored = dict(ep)
+            scored["score"] = round(score, 4)
+            scored_episodes.append(scored)
+
+        if not scored_episodes:
+            return {"episodes": [], "facts": []}
+
+        scored_episodes.sort(key=lambda e: e["score"], reverse=True)
+        top_episodes = scored_episodes[:k]
+
+        # Graph search (spreading activation) over entities in the query.
         query_entities = self.consolidator.extract_entities(query)
         graph_facts = []
         for ent in query_entities:
@@ -80,5 +114,12 @@ class Mnemo:
 
         return {
             "episodes": top_episodes,
-            "facts": graph_facts
+            "facts": graph_facts,
         }
+
+    def close(self):
+        """Release Chroma handles (Windows keeps files locked otherwise)."""
+        try:
+            self.embedder.client._system.stop()
+        except Exception:
+            pass

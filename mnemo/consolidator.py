@@ -1,11 +1,13 @@
 import spacy
 from spacy.cli import download as spacy_download
-from sklearn.cluster import DBSCAN
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 class Consolidator:
     def __init__(self, model_name="all-MiniLM-L6-v2"):
+        # model_name оставлен для совместимости: кластеризация (DBSCAN) убрана,
+        # второй энкодер больше не нужен — экономит ~400 МБ RAM и пару секунд
+        # на старте (docs/OVERHAUL.md §7, патч 15).
+        self.model_name = model_name
         spacy_model = "en_core_web_sm"
         try:
             self.nlp = spacy.load(spacy_model)
@@ -17,8 +19,6 @@ class Consolidator:
             except Exception as e:
                 print(f"Failed to auto-install. Please run: python -m spacy download {spacy_model}")
                 raise e
-        
-        self.encoder = SentenceTransformer(model_name)
         
     def extract_entities(self, text: str) -> list:
         """Extracts named entities and nouns."""
@@ -48,16 +48,10 @@ class Consolidator:
             return 0
 
         texts = [ep["content"] for ep in episodes]
-        
-        # 1. Clustering
-        embeddings = self.encoder.encode(texts)
-        clustering = DBSCAN(eps=0.5, min_samples=2, metric="cosine").fit(embeddings)
-        labels = clustering.labels_
 
-        # 2. Processing
+        # 1. Processing (кластеризация убрана: метки нигде не использовались)
         processed = 0
-        for idx, label in enumerate(labels):
-            text = texts[idx]
+        for idx, text in enumerate(texts):
             
             # A. Extract entities and create nodes
             entities = self.extract_entities(text)

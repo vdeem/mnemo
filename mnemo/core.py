@@ -51,21 +51,21 @@ class Mnemo:
             salience = det.get("salience", 0.5)
             meta = det.get("metadata", {})
             
-            # Base score: inverse rank from vector search (1st place = 1.0, 2nd = 0.9, etc.)
-            base_score = 1.0 - (i / len(raw_episodes)) 
+            # Base score: gentler rank decay, so valence can override
+            base_score = 0.5 - (i / max(len(raw_episodes), 1)) * 0.3   # range [0.2, 0.5]
             
             # Boost by salience (Amygdala tag)
-            score = base_score + (salience * 0.5)
+            score = base_score + (salience * 0.7)
             
-            # Boost by emotional alignment (if current mood is provided)
+            # Boost by emotional alignment (mood-congruent memory)
+            # This is the DOMINANT factor when mood is provided
             if current_valence is not None and "valence" in meta:
                 ep_valence = meta["valence"]
-                # Distance from -2 to 0. Closer to 0 = better.
-                valence_dist = abs(current_valence - ep_valence)
-                score += (1.0 - (valence_dist / 2.0)) * 0.5
+                valence_dist = abs(current_valence - ep_valence)  # [0, 2]
+                score += (1.0 - (valence_dist / 2.0)) * 1.0        # max +1.0
             
             scored_episodes.append((score, ep))
-            
+
         # 3. Sort by final score and take top K
         scored_episodes.sort(key=lambda x: x[0], reverse=True)
         top_episodes = [ep for score, ep in scored_episodes[:k]]
@@ -80,3 +80,11 @@ class Mnemo:
             "episodes": top_episodes,
             "facts": graph_facts
         }
+
+    def close(self):
+        """Release all database handles. Call this before deleting files (Windows)."""
+        try:
+            # Chroma's internal system holds SQLite connections
+            self.embedder.client._system.stop()
+        except Exception:
+            pass

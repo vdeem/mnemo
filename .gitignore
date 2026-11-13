@@ -29,3 +29,8 @@ mnemo_mcp_chroma
 *.sqlite3
 *_chroma/
 test_chroma_triples
+docs
+*.md
+# Exceptions
+!README.md
+!requirements.txt

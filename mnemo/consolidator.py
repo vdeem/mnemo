@@ -1,12 +1,8 @@
 import spacy
 from spacy.cli import download as spacy_download
-import numpy as np
 
 class Consolidator:
     def __init__(self, model_name="all-MiniLM-L6-v2"):
-        # model_name оставлен для совместимости: кластеризация (DBSCAN) убрана,
-        # второй энкодер больше не нужен — экономит ~400 МБ RAM и пару секунд
-        # на старте (docs/OVERHAUL.md §7, патч 15).
         self.model_name = model_name
         spacy_model = "en_core_web_sm"
         try:

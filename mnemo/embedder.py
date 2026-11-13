@@ -3,10 +3,6 @@ import os
 import chromadb
 from sentence_transformers import SentenceTransformer
 
-
-# Multilingual by default: Tera talks to the user in Russian, and the old
-# English-only MiniLM produced meaningless neighbours for Russian text.
-# e5 models expect "query:" / "passage:" prefixes, see _is_e5 below.
 DEFAULT_MODEL = os.getenv(
     "MNEMO_EMBED_MODEL", "intfloat/multilingual-e5-small"
 )

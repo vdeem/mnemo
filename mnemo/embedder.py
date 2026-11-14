@@ -40,7 +40,9 @@ class Embedder:
         embeddings = self.model.encode(
             texts, normalize_embeddings=True
         ).tolist()
-        self.collection.add(
+        # upsert, not add: a re-added id (retry, reindex, duplicate add) must
+        # overwrite the vector instead of raising a Chroma id collision.
+        self.collection.upsert(
             embeddings=embeddings, documents=documents, ids=ids
         )
 

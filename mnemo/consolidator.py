@@ -200,13 +200,19 @@ class Consolidator:
                     for left, right in islice(
                         combinations(node_ids, 2), MAX_COOCCURRENCE_PAIRS
                     ):
-                        db.reinforce_edge(left, right, relation="co_occurs", conn=conn)
+                        db.reinforce_edge(
+                            left, right, relation="co_occurs", conn=conn,
+                            episode_id=episode["id"],
+                        )
 
                 # C. Typed triples (explicit, high-confidence connections).
                 for subj, pred, obj in self._triples(doc):
                     subj_id = db.get_or_create_node(subj, conn=conn)
                     obj_id = db.get_or_create_node(obj, conn=conn)
-                    db.reinforce_edge(subj_id, obj_id, relation=pred, conn=conn)
+                    db.reinforce_edge(
+                        subj_id, obj_id, relation=pred, conn=conn,
+                        episode_id=episode["id"],
+                    )
 
             processed += 1
 

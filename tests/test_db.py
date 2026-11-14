@@ -115,6 +115,68 @@ def test_delete_episodes(db):
     assert db.episode_id_for("temp") is None
 
 
+def test_delete_episode_forgets_its_edges(db, tmp_db_path):
+    ep_id = db.add_episode("Alice knows Bob.")
+    alice = db.get_or_create_node("alice")
+    bob = db.get_or_create_node("bob")
+    db.reinforce_edge(alice, bob, relation="knows", episode_id=ep_id)
+
+    assert db.get_graph_context("alice")
+
+    assert db.delete_episodes([ep_id]) == 1
+
+    assert db.get_graph_context("alice") == []
+    with sqlite3.connect(tmp_db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM episode_edges").fetchone()[0] == 0
+
+
+def test_delete_episode_keeps_shared_edge(db):
+    first = db.add_episode("Alice knows Bob.")
+    second = db.add_episode("Alice still knows Bob.")
+    alice = db.get_or_create_node("alice")
+    bob = db.get_or_create_node("bob")
+    db.reinforce_edge(alice, bob, relation="knows", episode_id=first)
+    db.reinforce_edge(alice, bob, relation="knows", episode_id=second)
+
+    assert db.get_graph_context("alice")[0]["weight"] == 2.0
+
+    db.delete_episodes([first])
+    assert db.get_graph_context("alice")[0]["weight"] == 1.0
+
+    db.delete_episodes([second])
+    assert db.get_graph_context("alice") == []
+
+
+def test_delete_episode_subtracts_repeated_hits(db):
+    ep_id = db.add_episode("Alice knows Bob.")
+    alice = db.get_or_create_node("alice")
+    bob = db.get_or_create_node("bob")
+    db.reinforce_edge(alice, bob, relation="knows", episode_id=ep_id)
+    db.reinforce_edge(alice, bob, relation="knows", episode_id=ep_id)
+
+    assert db.get_graph_context("alice")[0]["weight"] == 2.0
+
+    db.delete_episodes([ep_id])
+
+    assert db.get_graph_context("alice") == []
+
+
+def test_decay_cascades_edge_provenance(db, tmp_db_path):
+    ep_id = db.add_episode("Alice knows Bob.")
+    alice = db.get_or_create_node("alice")
+    bob = db.get_or_create_node("bob")
+    db.reinforce_edge(alice, bob, relation="knows", episode_id=ep_id)
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.execute("UPDATE edges SET last_reinforced = '2000-01-01 00:00:00'")
+        conn.commit()
+
+    assert db.decay_edges(0.1, 0.05) > 0
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM episode_edges").fetchone()[0] == 0
+
+
 def test_delete_episodes_does_not_orphan_nodes(db, tmp_db_path):
     ep_id = db.add_episode("Alice knows Bob.")
     alice = db.get_or_create_node("alice")

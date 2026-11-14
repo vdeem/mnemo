@@ -171,6 +171,15 @@ class Database:
                     last_reinforced DATETIME DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(source_id, target_id, relation)
                 );
+                -- Which episodes contributed to an edge, and how many times.
+                -- Deleting an episode subtracts its hits so shared facts survive
+                -- while facts that only existed in that episode disappear.
+                CREATE TABLE IF NOT EXISTS episode_edges (
+                    episode_id TEXT NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+                    edge_id TEXT NOT NULL REFERENCES edges(id) ON DELETE CASCADE,
+                    hits INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY (episode_id, edge_id)
+                );
             """)
             # Columns added after the first release. ALTER TABLE ... ADD COLUMN
             # keeps existing user databases usable without rewriting rows.
@@ -292,34 +301,48 @@ class Database:
         return node_id
 
     def reinforce_edge(self, source_id: str, target_id: str, relation: str = "co_occurs",
-                       conn: sqlite3.Connection | None = None):
-        """Bump an edge's weight, creating it on first sight."""
+                       conn: sqlite3.Connection | None = None,
+                       episode_id: str | None = None):
+        """Bump an edge's weight, creating it on first sight.
+
+        When ``episode_id`` is given, the contribution is recorded so deleting
+        that episode can take its weight back out of the edge.
+        """
         if source_id == target_id:
             return
         if conn is not None:
-            self._reinforce_edge(conn, source_id, target_id, relation)
+            self._reinforce_edge(conn, source_id, target_id, relation, episode_id)
             return
         with self._conn() as own:
-            self._reinforce_edge(own, source_id, target_id, relation)
+            self._reinforce_edge(own, source_id, target_id, relation, episode_id)
 
     @staticmethod
     def _reinforce_edge(conn: sqlite3.Connection, source_id: str, target_id: str,
-                        relation: str) -> None:
+                        relation: str, episode_id: str | None = None) -> str:
         cursor = conn.execute(
             "SELECT id FROM edges WHERE source_id = ? AND target_id = ? AND relation = ?",
             (source_id, target_id, relation)
         )
         row = cursor.fetchone()
         if row:
+            edge_id = row[0]
             conn.execute(
                 "UPDATE edges SET weight = weight + 1.0, last_reinforced = CURRENT_TIMESTAMP WHERE id = ?",
-                (row[0],)
+                (edge_id,)
             )
         else:
+            edge_id = str(uuid.uuid4())
             conn.execute(
                 "INSERT INTO edges (id, source_id, target_id, relation) VALUES (?, ?, ?, ?)",
-                (str(uuid.uuid4()), source_id, target_id, relation)
+                (edge_id, source_id, target_id, relation)
             )
+        if episode_id is not None:
+            conn.execute(
+                "INSERT INTO episode_edges (episode_id, edge_id, hits) VALUES (?, ?, 1) "
+                "ON CONFLICT(episode_id, edge_id) DO UPDATE SET hits = hits + 1",
+                (episode_id, edge_id),
+            )
+        return edge_id
 
     def get_graph_context(self, node_name: str, depth=1) -> list:
         """Returns the node’s connections in the graph."""
@@ -437,6 +460,12 @@ class Database:
     def delete_episodes(self, ids: list, orphan_grace_days: int = ORPHAN_NODE_GRACE_DAYS) -> int:
         """Remove episodes by id; the vector index is cleaned separately.
 
+        An edge's weight is the sum of the episodes that reinforced it, so
+        deleting an episode subtracts its recorded hits. Shared facts survive
+        with a lower weight; facts that existed only in the deleted episode
+        disappear. Edges created before ``episode_edges`` existed have no
+        provenance and are left untouched.
+
         Consolidation creates nodes that no episode row owns, so deleting
         episodes can leave the graph holding concepts nothing points at any
         more. Nodes are only dropped when they have no edge at all *and* have
@@ -447,11 +476,28 @@ class Database:
             return 0
         placeholders = ','.join('?' * len(ids))
         with self._conn() as conn:
+            # Read the contributions before deleting the episodes: their
+            # episode_edges rows disappear with them (ON DELETE CASCADE).
+            contributions = conn.execute(
+                f"SELECT edge_id, SUM(hits) FROM episode_edges "
+                f"WHERE episode_id IN ({placeholders}) GROUP BY edge_id",
+                ids,
+            ).fetchall()
+
             cursor = conn.execute(
                 f"DELETE FROM episodes WHERE id IN ({placeholders})", ids
             )
             deleted = cursor.rowcount
+
             if deleted:
+                for edge_id, hits in contributions:
+                    conn.execute(
+                        "UPDATE edges SET weight = weight - ? WHERE id = ?",
+                        (float(hits), edge_id),
+                    )
+                # An edge whose weight came only from deleted episodes is no
+                # longer a fact; drop it (and any remaining provenance links).
+                conn.execute("DELETE FROM edges WHERE weight <= 0")
                 self._delete_orphan_nodes(conn, orphan_grace_days)
             return deleted
 

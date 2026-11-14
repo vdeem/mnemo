@@ -92,6 +92,30 @@ def test_cooccurrence_is_bounded(mnemo, tmp_db_path):
     assert pair_count == MAX_COOCCURRENCE_PAIRS
 
 
+def test_consolidation_records_edge_provenance(mnemo, tmp_db_path):
+    ep_id = mnemo.add("Bob likes tea.")
+    mnemo.consolidate()
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        rows = conn.execute(
+            "SELECT episode_id, COUNT(*) FROM episode_edges GROUP BY episode_id"
+        ).fetchall()
+
+    # One co_occurs edge and one typed "like" edge, both from this episode.
+    assert rows == [(ep_id, 2)]
+
+
+def test_delete_episode_forgets_graph_facts(mnemo):
+    ep_id = mnemo.add("Bob likes tea.")
+    mnemo.consolidate()
+    assert any(fact["relation"] == "like" for fact in mnemo.recall("tea")["facts"])
+
+    mnemo.delete([ep_id])
+
+    assert mnemo.db.get_graph_context("bob") == []
+    assert mnemo.recall("tea")["facts"] == []
+
+
 def test_cooccurrence_is_sentence_scoped(mnemo, tmp_db_path):
     mnemo.add("Ava met Ben. Cleo met Dan. Eve met Finn.")
     mnemo.consolidate()

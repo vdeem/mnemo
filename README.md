@@ -22,6 +22,7 @@ Mnemo takes a different approach: **cognitive consolidation**. It uses local NLP
 - **Lightweight** — Runs on consumer hardware, no GPU required.
 - **Forgetting (Decay)** — Old, unreinforced connections fade away and are archived, preventing database bloat and keeping only the most relevant memories.
 - **Idempotent Consolidation** — Each episode is consolidated once; re-running `consolidate()` never inflates edge weights.
+- **Crash-safe and forgetful** — Deleting an episode removes the facts only it supported, and a consolidation pass interrupted mid-way resumes without double-counting weights.
 - **Agent brief** — After consolidation, Mnemo writes `.mnemo/AGENT_CONTEXT.md`, a human- and agent-readable summary of the current graph. Any agent (MCP or not) can read it at session start.
 
 ## Installation
@@ -64,7 +65,8 @@ mnemo.delete([episode_id])
 
 1. **Episodic Memory** — Raw texts are embedded with `intfloat/multilingual-e5-small` and stored in ChromaDB.
 2. **Semantic Memory** — Consolidation processes only episodes it has not seen yet (`consolidated_at`), extracts entities and triples with spaCy, and builds a weighted graph in SQLite.
-3. **Retrieval** — A query triggers a vector search filtered by `max_distance` (with salience and recency as small tie-breakers) plus a graph lookup, giving the agent both the original context and structured facts.
+3. **Retrieval** — A query triggers a vector search filtered by `max_distance` (with salience and recency as small tie-breakers) plus a graph lookup, giving the agent both the original context and structured facts. Vectors whose episode row no longer exists are ignored and pruned at startup.
+4. **Deletion & durability** — `delete()` removes the episode, its vectors and its recorded edge contributions; edges still supported by other episodes remain. Each consolidation pass marks episodes inside their write transaction, so a crash resumes instead of inflating weights.
 
 ## Roadmap
 
@@ -74,7 +76,10 @@ mnemo.delete([episode_id])
 - [x] MCP (Model Context Protocol) server
 - [x] Multilingual embeddings (`intfloat/multilingual-e5-small`)
 - [~] Multi-language support — partial: retrieval is multilingual, spaCy extraction is still English-only
-- [ ] Phase 2 — Agent context brief and RAG adapters
+- [x] Phase 2 — Agent context brief
+- [ ] Phase 2b — RAG adapters
+
+See [docs/status.md](docs/status.md) for the current status, recent changes and the detailed roadmap.
 
 ## License
 

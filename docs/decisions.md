@@ -101,4 +101,53 @@ of the graph, not a second source of truth.
   `brief_path=...`.
 - Rendering is read-only: no schema changes and no writes besides the brief.
 
+## ADR-007 — SQLite is authoritative for the vector index
+
+**Decision:** `Mnemo.__init__` calls `Embedder.reconcile()`, which adds vectors
+missing from Chroma and deletes vectors whose episode row no longer exists.
+`recall()` additionally skips any Chroma id that has no episode row.
+
+**Why:** the two stores are written in separate steps, so a crash between them
+(and a restored or backed-up SQLite file) can leave vectors without rows.
+Serving those ghosts made `delete()` untrustworthy and made re-adding a deleted
+text impossible: dedupe returned a ghost id and never inserted the row.
+
+**Consequences:** startup reads the full id set from Chroma and prunes it, so a
+deliberately empty SQLite database also empties the index (which is rebuildable
+from the source of truth). `Embedder.ensure_ids()` keeps its additive behaviour
+for callers that only want a backfill; `reconcile()` is the full sync.
+
+## ADR-008 — edge provenance via `episode_edges`
+
+**Decision:** consolidation records every edge contribution in
+`episode_edges(episode_id, edge_id, hits)`. `delete_episodes()` subtracts the
+deleted episodes' hits from the edge weight and removes edges left with no
+support.
+
+**Why:** edges were global, so deleting the only episode that stated a fact left
+that fact in the graph forever. For a memory engine that makes `delete()` and
+privacy promises false; the only way to forget was decay.
+
+**Consequences:** edge weights remain the sum of contributing episodes, so a
+shared fact survives with a lower weight. Both foreign keys cascade, so decay's
+archiving and any edge deletion clean up provenance automatically. Edges created
+before this table existed have no rows and cannot be attributed; deleting their
+episodes leaves them in place, which is documented in `docs/status.md`.
+
+## ADR-009 — mark consolidation inside the write transaction
+
+**Decision:** `Consolidator.consolidate()` calls
+`Database.mark_consolidated(id, conn=conn)` inside the same `Database.batch()`
+that writes the episode's nodes and edges. `Mnemo.consolidate()` no longer marks
+episodes after the pass.
+
+**Why:** marking after the loop meant a mid-pass crash left committed edges on
+an episode that still looked unconsolidated. Re-running consolidation then
+re-processed it and doubled every weight, violating the idempotency guarantee.
+
+**Consequences:** consolidation is resumable: finished episodes are marked,
+the crashed episode is fully rolled back, and unprocessed episodes keep their
+`consolidated_at IS NULL`. The consolidator now owns the marking invariant;
+custom consolidators must mark their episodes the same way.
+
 

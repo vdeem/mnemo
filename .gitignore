@@ -11,6 +11,9 @@ pycache/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
 .mypy_cache/
 *.pyc
 .ruff_cache/

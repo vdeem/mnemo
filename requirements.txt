@@ -1,6 +1,4 @@
 chromadb
 sentence-transformers
 spacy
-scikit-learn
-networkx
 mcp

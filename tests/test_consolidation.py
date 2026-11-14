@@ -3,6 +3,8 @@
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+from mnemo.consolidator import MAX_COOCCURRENCE_PAIRS
+
 
 def test_consolidate_returns_count(mnemo):
     mnemo.add("Alice is a software engineer.")
@@ -61,3 +63,41 @@ def test_consolidate_marks_episodes(mnemo):
     mnemo.consolidate()
 
     assert mnemo.db.get_unconsolidated_episodes(10) == []
+
+
+def _cooccurrence_pairs(db_path):
+    with sqlite3.connect(db_path) as conn:
+        return {
+            frozenset(row)
+            for row in conn.execute(
+                "SELECT n1.name, n2.name FROM edges e "
+                "JOIN nodes n1 ON e.source_id = n1.id "
+                "JOIN nodes n2 ON e.target_id = n2.id "
+                "WHERE e.relation = 'co_occurs'"
+            )
+        }
+
+
+def test_cooccurrence_is_bounded(mnemo, tmp_db_path):
+    # Nine entities in one sentence: 36 unordered pairs without a cap.
+    mnemo.add(
+        "Wombat, Otter, Badger, Heron, Lynx, Marmot, Puffin, Quokka, Raven "
+        "and Stoat appear."
+    )
+    mnemo.consolidate()
+
+    pair_count = len(_cooccurrence_pairs(tmp_db_path))
+
+    assert 0 < pair_count <= 45
+    assert pair_count == MAX_COOCCURRENCE_PAIRS
+
+
+def test_cooccurrence_is_sentence_scoped(mnemo, tmp_db_path):
+    mnemo.add("Ava met Ben. Cleo met Dan. Eve met Finn.")
+    mnemo.consolidate()
+
+    assert _cooccurrence_pairs(tmp_db_path) == {
+        frozenset(("ava", "ben")),
+        frozenset(("cleo", "dan")),
+        frozenset(("eve", "finn")),
+    }

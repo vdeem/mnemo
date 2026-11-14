@@ -7,6 +7,7 @@ with spaCy and writes the resulting nodes/edges through ``Database``.
 
 import logging
 import re
+from itertools import combinations, islice
 
 import spacy
 from spacy.cli import download as spacy_download
@@ -193,20 +194,23 @@ class Consolidator:
         for episode in episodes:
             doc = self.nlp(episode["content"])
 
-            # A. Entities -> nodes (normalized name, original casing kept).
-            node_ids = [
-                db.get_or_create_node(
-                    mention["name"],
-                    mention["node_type"],
-                    display_name=mention["display_name"],
-                )
-                for mention in self._entity_mentions(doc)
-            ]
-
-            # B. Co-occurrence edges (implicit connections).
-            for i in range(len(node_ids)):
-                for j in range(i + 1, len(node_ids)):
-                    db.reinforce_edge(node_ids[i], node_ids[j], relation="co_occurs")
+            # A+B. Entities become nodes; co-occurrence edges link only
+            # entities that share a sentence, and at most MAX_COOCCURRENCE_PAIRS
+            # per sentence. Linking everything in the episode turned a 30-entity
+            # mention list into 435 meaningless edges.
+            for sent in doc.sents:
+                node_ids = [
+                    db.get_or_create_node(
+                        mention["name"],
+                        mention["node_type"],
+                        display_name=mention["display_name"],
+                    )
+                    for mention in self._entity_mentions(sent)
+                ]
+                for left, right in islice(
+                    combinations(node_ids, 2), MAX_COOCCURRENCE_PAIRS
+                ):
+                    db.reinforce_edge(left, right, relation="co_occurs")
 
             # C. Typed triples (explicit, high-confidence connections).
             for subj, pred, obj in self._triples(doc):

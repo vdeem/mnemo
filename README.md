@@ -6,7 +6,7 @@ A local-first, zero-LLM memory engine for AI agents.
 
 Most AI memory solutions (Mem0, Zep) use LLM calls on every message to extract facts. This is expensive, slow, and requires an API key.
 
-Mnemo takes a different approach: **cognitive consolidation**. It uses clustering and NLP to build a semantic knowledge graph entirely on your local machine.
+Mnemo takes a different approach: **cognitive consolidation**. It uses local NLP and embeddings to build a semantic knowledge graph entirely on your machine.
 
 - **No API costs**
 - **No data leaks**
@@ -14,11 +14,13 @@ Mnemo takes a different approach: **cognitive consolidation**. It uses clusterin
 
 ## Features
 
-- **Zero-LLM Extraction** — Uses SpaCy and DBSCAN to extract entities and relationships without calling OpenAI.
-- **Hybrid Retrieval** — Combines vector similarity (episodic memory) with graph traversal (semantic memory).
+- **Zero-LLM Extraction** — Uses spaCy for lemmatized entities and dependency-parsed triples; no OpenAI call, ever.
+- **Multilingual Retrieval** — Vectors come from `intfloat/multilingual-e5-small`, so a Chinese query can recall an English memory. (Extraction itself is English-only via `en_core_web_sm`.)
+- **Hybrid Retrieval** — Combines vector similarity (episodic memory) with graph traversal (semantic memory); a `max_distance` threshold drops weak matches instead of returning noise.
 - **Local-First** — SQLite and ChromaDB on your disk.
 - **Lightweight** — Runs on consumer hardware, no GPU required.
-- **Forgetting (Decay)**: Old, unreinforced connections fade away and are archived, preventing database bloat and keeping only the most relevant memories.
+- **Forgetting (Decay)** — Old, unreinforced connections fade away and are archived, preventing database bloat and keeping only the most relevant memories.
+- **Idempotent Consolidation** — Each episode is consolidated once; re-running `consolidate()` never inflates edge weights.
 
 ## Installation
 
@@ -26,7 +28,7 @@ Mnemo takes a different approach: **cognitive consolidation**. It uses clusterin
 pip install -r requirements.txt
 ```
 
-The SpaCy model (`en_core_web_sm`) downloads automatically on first run.
+The spaCy pipeline (`en_core_web_sm`) and the embedding model (`intfloat/multilingual-e5-small`) download automatically on first run.
 
 ## Quick Start
 
@@ -37,10 +39,10 @@ from mnemo.core import Mnemo
 mnemo = Mnemo(db_path="my_agent.db", chroma_path="./chroma_db")
 
 # 1. Add memories (episodic layer)
-mnemo.add("Alice is a software engineer based in London.")
+episode_id = mnemo.add("Alice is a software engineer based in London.")
 mnemo.add("Bob is working on a project using PyTorch.")
 
-# 2. Consolidate (builds the graph)
+# 2. Consolidate (builds the graph; only new episodes are processed)
 mnemo.consolidate()
 
 # 3. Recall (hybrid search)
@@ -48,13 +50,19 @@ results = mnemo.recall("What technologies is Bob using?")
 
 print(results["episodes"])  # Raw texts from vector search
 print(results["facts"])     # Graph relations (Bob -> pytorch)
+
+# 4. Tighten recall: drop anything farther than max_distance (cosine, 0..2)
+results = mnemo.recall("What technologies is Bob using?", k=3, max_distance=0.5)
+
+# 5. Delete a memory (removes the episode and its vector)
+mnemo.delete([episode_id])
 ```
 
 ## How it works
 
-1. **Episodic Memory** — Raw texts are embedded and stored in ChromaDB.
-2. **Semantic Memory** — Background consolidation extracts entities via NLP and builds a weighted graph in SQLite.
-3. **Retrieval** — A query triggers both a vector search and a graph lookup, giving the agent both the original context and structured facts.
+1. **Episodic Memory** — Raw texts are embedded with `intfloat/multilingual-e5-small` and stored in ChromaDB.
+2. **Semantic Memory** — Consolidation processes only episodes it has not seen yet (`consolidated_at`), extracts entities and triples with spaCy, and builds a weighted graph in SQLite.
+3. **Retrieval** — A query triggers a vector search filtered by `max_distance` (with salience and recency as small tie-breakers) plus a graph lookup, giving the agent both the original context and structured facts.
 
 ## Roadmap
 
@@ -62,7 +70,8 @@ print(results["facts"])     # Graph relations (Bob -> pytorch)
 - [x] Zero-LLM consolidation
 - [x] Decay & forgetting algorithm
 - [x] MCP (Model Context Protocol) server
-- [ ] Multi-language SpaCy support
+- [x] Multilingual embeddings (`intfloat/multilingual-e5-small`)
+- [ ] Multilingual spaCy extraction (retrieval is multilingual today; extraction is English-only)
 
 ## License
 

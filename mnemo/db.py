@@ -113,7 +113,8 @@ class Database:
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL UNIQUE,
                     node_type TEXT,
-                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    display_name TEXT
                 );
                 CREATE TABLE IF NOT EXISTS edges (
                     id TEXT PRIMARY KEY,
@@ -128,6 +129,7 @@ class Database:
             # Columns added after the first release. ALTER TABLE ... ADD COLUMN
             # keeps existing user databases usable without rewriting rows.
             _ensure_column(conn, "episodes", "consolidated_at", "DATETIME")
+            _ensure_column(conn, "nodes", "display_name", "TEXT")
 
     def add_episode(self, content: str, metadata: dict = None, salience: float = 0.5) -> str:
         with self._conn() as conn:
@@ -196,19 +198,33 @@ class Database:
             )
             return cursor.rowcount
 
-    def get_or_create_node(self, name: str, node_type: str = "entity") -> str:
+    def get_or_create_node(self, name: str, node_type: str = "entity",
+                           display_name: str | None = None) -> str:
+        """Return the node id for a normalized name, creating it if needed.
+
+        ``name`` is the graph key (lowercase lemma); ``display_name`` preserves
+        the original casing for humans and defaults to ``name``.
+        """
         name = name.lower().strip()
+        display = (display_name or name).strip() or name
         with self._conn() as conn:
             cursor = conn.execute("SELECT id FROM nodes WHERE name = ?", (name,))
             row = cursor.fetchone()
             if row:
-                conn.execute("UPDATE nodes SET last_seen = CURRENT_TIMESTAMP WHERE id = ?", (row[0],))
+                # Fill in the display name for rows created before the column
+                # existed, but never churn it on every consolidation run.
+                conn.execute(
+                    "UPDATE nodes SET last_seen = CURRENT_TIMESTAMP, "
+                    "display_name = COALESCE(display_name, ?) WHERE id = ?",
+                    (display, row[0]),
+                )
                 return row[0]
-            
+
             node_id = str(uuid.uuid4())
             conn.execute(
-                "INSERT INTO nodes (id, name, node_type) VALUES (?, ?, ?)",
-                (node_id, name, node_type)
+                "INSERT INTO nodes (id, name, node_type, display_name) "
+                "VALUES (?, ?, ?, ?)",
+                (node_id, name, node_type, display),
             )
             return node_id
 

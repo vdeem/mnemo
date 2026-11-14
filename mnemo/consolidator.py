@@ -1,75 +1,121 @@
+"""Entity and triple extraction plus graph consolidation.
+
+No sentence encoder lives here: ``Embedder`` owns the only
+``SentenceTransformer`` instance (see AGENTS.md). This module only parses text
+with spaCy and writes the resulting nodes/edges through ``Database``.
+"""
+
+import logging
+import re
+
 import spacy
 from spacy.cli import download as spacy_download
 
+log = logging.getLogger(__name__)
+
+# spaCy labels that describe a concept worth a node. Date/time/quantity labels
+# would flood the graph with one-off nodes.
+ENTITY_LABELS = {"PERSON", "ORG", "GPE", "PRODUCT", "EVENT"}
+
+# Nouns too vague to connect anything: keeping them turns the graph into a hub
+# where unrelated episodes are linked through "thing" or "user".
+GENERIC_NOUNS = {
+    "thing",
+    "way",
+    "today",
+    "tomorrow",
+    "yesterday",
+    "project",
+    "user",
+    "someone",
+    "anyone",
+    "everything",
+    "something",
+    "nothing",
+}
+
+# A sentence with many entities is usually a list, not a claim about how they
+# relate, so cap the quadratic pair explosion.
+MAX_COOCCURRENCE_PAIRS = 10
+
+# "User's" -> "User", "users’" -> "users". spaCy splits the clitic off most
+# tokens, but named-entity spans can still carry it.
+_POSSESSIVE = re.compile(r"(?:['’]s|['’])$")
+
+
+def _strip_possessive(text: str) -> str:
+    return _POSSESSIVE.sub("", text.strip()).strip()
+
+
 class Consolidator:
-    def __init__(self, model_name="all-MiniLM-L6-v2"):
-        self.model_name = model_name
+    def __init__(self):
         spacy_model = "en_core_web_sm"
         try:
             self.nlp = spacy.load(spacy_model)
         except OSError:
-            print(f"Downloading spaCy model '{spacy_model}'...")
+            log.info("Downloading spaCy model '%s'...", spacy_model)
             try:
                 spacy_download(spacy_model)
                 self.nlp = spacy.load(spacy_model)
             except Exception as e:
-                print(f"Failed to auto-install. Please run: python -m spacy download {spacy_model}")
+                log.error(
+                    "Failed to auto-install. Please run: python -m spacy download %s",
+                    spacy_model,
+                )
                 raise e
-        
-    def extract_entities(self, text: str) -> list:
-        """Extracts named entities and nouns."""
-        doc = self.nlp(text)
-        entities = set()
-        
-        # Named entities (people, companies, places)
+
+    # ------------------------------------------------------------------
+    # Extraction
+    # ------------------------------------------------------------------
+
+    def extract_entities(self, text: str) -> list[str]:
+        """Normalized entity names (lowercase, lemmatized) mentioned in text."""
+        return [mention["name"] for mention in self._entity_mentions(self.nlp(text))]
+
+    def extract_entity_mentions(self, text: str) -> list[dict]:
+        """Entities with graph metadata: ``name``, ``display_name``, ``node_type``.
+
+        ``name`` is the normalized graph key (lemma, lowercase) so "Dog",
+        "dogs" and "Dog's" collapse into one node; ``display_name`` keeps the
+        original casing for humans.
+        """
+        return self._entity_mentions(self.nlp(text))
+
+    def _entity_mentions(self, doc) -> list[dict]:
+        """Entity mentions for a parsed ``Doc`` or ``Span``."""
+        mentions: dict[str, dict] = {}
+
+        def remember(raw: str, node_type: str) -> None:
+            display = _strip_possessive(raw)
+            name = display.lower()
+            if not name or name in GENERIC_NOUNS:
+                return
+            if name not in mentions:
+                mentions[name] = {
+                    "name": name,
+                    "display_name": display or name,
+                    "node_type": node_type,
+                }
+            elif mentions[name]["node_type"] == "entity" and node_type != "entity":
+                # A typed NER hit outranks a bare noun chunk for the same word.
+                mentions[name]["node_type"] = node_type
+
+        # Named entities first: their label is the most specific node type.
         for ent in doc.ents:
-            if ent.label_ in ("PERSON", "ORG", "GPE", "PRODUCT", "EVENT"):
-                entities.add(ent.text.lower())
-                
-        # Nouns (core concepts)
+            if ent.label_ in ENTITY_LABELS:
+                remember(ent.text, ent.label_)
+
+        # Nouns (core concepts), keyed by lemma so "dog"/"dogs" become "dog".
         for chunk in doc.noun_chunks:
-            # Keep only the chunk’s root word to avoid “the python”
-            root = chunk.root.text.lower()
-            if len(root) > 2 and not self.nlp.vocab[root].is_stop:
-                entities.add(root)
-                
-        return list(entities)
+            root = chunk.root
+            if root.pos_ not in ("NOUN", "PROPN"):
+                continue  # pronouns ("It") are not concepts
+            lemma = root.lemma_.lower()
+            if len(lemma) <= 2 or self.nlp.vocab[lemma].is_stop:
+                continue
+            remember(root.lemma_, "entity")
 
-    def consolidate(self, episodes: list, db) -> int:
-        """
-        Takes a list of episodes, clusters them, extracts relations, 
-        and updates the knowledge graph.
-        """
-        if not episodes:
-            return 0
-
-        texts = [ep["content"] for ep in episodes]
-
-        # 1. Processing (кластеризация убрана: метки нигде не использовались)
-        processed = 0
-        for idx, text in enumerate(texts):
-            
-            # A. Extract entities and create nodes
-            entities = self.extract_entities(text)
-            node_ids = []
-            for ent in entities:
-                node_ids.append(db.get_or_create_node(ent))
-                
-            # B. Co-occurrence edges (for implicit connections)
-            for i in range(len(node_ids)):
-                for j in range(i + 1, len(node_ids)):
-                    db.reinforce_edge(node_ids[i], node_ids[j], relation="co_occurs")
-            
-            # C. Typed triples (for explicit connections)
-            triples = self.extract_triples(text)
-            for subj, pred, obj in triples:
-                subj_id = db.get_or_create_node(subj)
-                obj_id = db.get_or_create_node(obj)
-                db.reinforce_edge(subj_id, obj_id, relation=pred)
-            
-            processed += 1
-
-        return processed
+        return list(mentions.values())
 
     def extract_triples(self, text: str) -> list[tuple[str, str, str]]:
         """
@@ -78,7 +124,9 @@ class Consolidator:
           "Jack is a dog" -> ("jack", "is_a", "dog")
           "user won a lottery" -> ("user", "won", "lottery")
         """
-        doc = self.nlp(text)
+        return self._triples(self.nlp(text))
+
+    def _triples(self, doc) -> list[tuple[str, str, str]]:
         triples = []
 
         for token in doc:
@@ -96,7 +144,7 @@ class Consolidator:
                         for p_child in child.children:
                             if p_child.dep_ == "pobj":
                                 obj = p_child.text.lower()
-                
+
                 if subj and obj:
                     # Transitive verb: Subject + Verb + Object
                     triples.append((subj, token.lemma_.lower(), obj))
@@ -119,11 +167,11 @@ class Consolidator:
                     elif child.dep_ in ("attr", "acomp"):
                         # If it's a noun phrase, take the head noun
                         comp = child.text.lower()
-                
+
                 if subj and comp:
                     triples.append((subj, "is_a", comp))
 
-        # 3. Possessions (Users's dog)
+        # 3. Possessions (User's dog)
         for token in doc:
             if token.dep_ == "poss":
                 subj = token.text.lower()
@@ -131,3 +179,41 @@ class Consolidator:
                 triples.append((subj, "has_a", head))
 
         return list(set(triples))  # Remove duplicates
+
+    # ------------------------------------------------------------------
+    # Consolidation
+    # ------------------------------------------------------------------
+
+    def consolidate(self, episodes: list, db) -> int:
+        """Turn episodes into graph nodes and edges; returns episodes processed."""
+        if not episodes:
+            return 0
+
+        processed = 0
+        for episode in episodes:
+            doc = self.nlp(episode["content"])
+
+            # A. Entities -> nodes (normalized name, original casing kept).
+            node_ids = [
+                db.get_or_create_node(
+                    mention["name"],
+                    mention["node_type"],
+                    display_name=mention["display_name"],
+                )
+                for mention in self._entity_mentions(doc)
+            ]
+
+            # B. Co-occurrence edges (implicit connections).
+            for i in range(len(node_ids)):
+                for j in range(i + 1, len(node_ids)):
+                    db.reinforce_edge(node_ids[i], node_ids[j], relation="co_occurs")
+
+            # C. Typed triples (explicit, high-confidence connections).
+            for subj, pred, obj in self._triples(doc):
+                subj_id = db.get_or_create_node(subj)
+                obj_id = db.get_or_create_node(obj)
+                db.reinforce_edge(subj_id, obj_id, relation=pred)
+
+            processed += 1
+
+        return processed

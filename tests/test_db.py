@@ -30,6 +30,17 @@ def test_reinforce_edge_increments_weight(db):
     assert facts[0]["weight"] == 2.0
 
 
+def test_get_or_create_node_stores_display_name(db, tmp_db_path):
+    db.get_or_create_node("jack", "PERSON", display_name="Jack")
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        row = conn.execute(
+            "SELECT display_name, node_type FROM nodes WHERE name = 'jack'"
+        ).fetchone()
+
+    assert row == ("Jack", "PERSON")
+
+
 def test_delete_episodes(db):
     ep_id = db.add_episode("temp")
     assert db.delete_episodes([ep_id]) == 1

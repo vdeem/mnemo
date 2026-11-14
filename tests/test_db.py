@@ -157,6 +157,18 @@ def test_unconsolidated_episodes_exclude_marked_rows(db):
     assert [ep["id"] for ep in db.get_unconsolidated_episodes(10)] == [second]
 
 
+def test_get_episode_details_tolerates_null_metadata(db, tmp_db_path):
+    ep_id = db.add_episode("legacy row")
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.execute("UPDATE episodes SET metadata = NULL WHERE id = ?", (ep_id,))
+        conn.commit()
+
+    details = db.get_episode_details([ep_id])
+
+    assert details[ep_id]["metadata"] == {}
+
+
 def test_init_db_adds_consolidated_at_to_legacy_table(tmp_db_path):
     """Old databases predate the column; _init_db must add it in place."""
     with sqlite3.connect(tmp_db_path) as conn:

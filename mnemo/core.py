@@ -64,13 +64,16 @@ class Mnemo:
         self.db = Database(db_path)
         self.embedder = Embedder(db_path=chroma_path)
         self.consolidator = Consolidator()
-        self._last_duplicate_id: str | None = None
-        # SQLite is the source of truth; Chroma is only a search index.
-        # Backfills vectors after a model switch instead of losing old episodes.
-        reindexed = self.embedder.ensure_ids(self.db.all_episodes())
-        if reindexed:
+        # SQLite is the source of truth; Chroma is only a search index. Rebuild
+        # missing vectors after a model switch and drop vectors whose episode
+        # row is gone (a crash between the two stores leaves orphans behind).
+        added, pruned = self.embedder.reconcile(self.db.all_episodes())
+        if added or pruned:
             log.info(
-                "reindexed %d episodes with %s", reindexed, self.embedder.model_name
+                "reconciled vector index for %s: +%d added, -%d pruned",
+                self.embedder.model_name,
+                added,
+                pruned,
             )
 
     def add(self, text: str, metadata: dict = None, salience: float = 0.5,
@@ -83,30 +86,44 @@ class Mnemo:
         existing = self.db.episode_id_for(text)
         if existing:
             self.db.reinforce_episode(existing)
+            # A crash between the SQLite insert and the vector upsert leaves the
+            # episode invisible to recall; heal it on the next duplicate add.
+            if not self.embedder.contains(existing):
+                self.embedder.add(ids=[existing], documents=[text])
             return existing
 
-        if dedupe and self._is_near_duplicate(text):
-            return self._last_duplicate_id
+        if dedupe:
+            duplicate = self._near_duplicate_id(text)
+            if duplicate:
+                return duplicate
 
         ep_id = self.db.add_episode(text, metadata, salience=salience)
         self.embedder.add(ids=[ep_id], documents=[text])
         return ep_id
 
-    def _is_near_duplicate(self, text: str) -> bool:
+    def _near_duplicate_id(self, text: str) -> str | None:
+        """Return the id of an existing near-duplicate episode, if any.
+
+        Only rows that still exist in SQLite count: a vector whose episode was
+        deleted is dropped instead of swallowing the new text forever.
+        """
         max_distance = float(os.getenv("MNEMO_DEDUPE_DISTANCE", "0.10"))
         try:
             similar = self.embedder.find_similar(text, k=1)
         except Exception as e:
             log.warning("dedupe check failed: %s", e)
-            return False
+            return None
         if not similar:
-            return False
+            return None
         best = similar[0]
-        if best.get("distance") is not None and best["distance"] <= max_distance:
-            self._last_duplicate_id = best["id"]
-            self.db.reinforce_episode(best["id"])
-            return True
-        return False
+        distance = best.get("distance")
+        if distance is None or distance > max_distance:
+            return None
+        if not self.db.episode_exists(best["id"]):
+            self.embedder.delete([best["id"]])
+            return None
+        self.db.reinforce_episode(best["id"])
+        return best["id"]
 
     def consolidate(self, limit=50, write_brief: bool = True,
                     brief_path: str | None = None):
@@ -175,7 +192,12 @@ class Mnemo:
             if distance is not None and distance > max_distance:
                 continue
 
-            det = details.get(ep["id"], {})
+            det = details.get(ep["id"])
+            if det is None:
+                # Orphaned vector: the episode row is gone, so this memory does
+                # not exist. Startup reconcile removes it, but recall must stay
+                # correct even before the next restart.
+                continue
             # Cosine distance is 0..2 for normalized vectors -> similarity 0..1.
             similarity = max(0.0, 1.0 - (distance or 0.0) / 2.0)
             salience = float(det.get("salience", 0.5))

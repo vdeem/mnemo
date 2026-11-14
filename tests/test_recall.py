@@ -135,3 +135,50 @@ def test_recall_weights_public_exports():
     assert mnemo.Mnemo is Mnemo
     assert mnemo.RecallWeights is RecallWeights
     assert mnemo.PRESETS is PRESETS
+
+
+def test_recall_ignores_orphan_vector(mnemo):
+    """A vector whose episode row is gone must not resurface as a memory."""
+    ep_id = mnemo.add("The vault code is 1234.")
+    # Simulate a crash between the SQLite delete and the Chroma delete.
+    mnemo.db.delete_episodes([ep_id])
+
+    assert mnemo.recall("vault")["episodes"] == []
+    assert mnemo.embedder.collection.count() == 1
+
+
+def test_readd_after_db_only_delete_is_durable(mnemo):
+    """Re-adding a deleted text must insert a row, not reinforce a ghost."""
+    ep_id = mnemo.add("The vault code is 1234.")
+    mnemo.db.delete_episodes([ep_id])
+
+    new_id = mnemo.add("The vault code is 1234.")
+
+    assert new_id != ep_id
+    assert mnemo.db.episode_id_for("The vault code is 1234.") == new_id
+    assert [ep["id"] for ep in mnemo.recall("vault")["episodes"]] == [new_id]
+
+
+def test_startup_prunes_orphan_vectors(tmp_db_path, tmp_chroma_path):
+    first = Mnemo(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
+    try:
+        ep_id = first.add("The vault code is 1234.")
+        first.db.delete_episodes([ep_id])
+        assert first.embedder.collection.count() == 1
+    finally:
+        first.close()
+
+    second = Mnemo(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
+    try:
+        assert second.embedder.collection.count() == 0
+    finally:
+        second.close()
+
+
+def test_exact_duplicate_heals_missing_vector(mnemo):
+    ep_id = mnemo.add("The vault code is 1234.")
+    mnemo.embedder.delete([ep_id])
+    assert mnemo.embedder.collection.count() == 0
+
+    assert mnemo.add("The vault code is 1234.") == ep_id
+    assert mnemo.embedder.collection.count() == 1

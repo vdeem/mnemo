@@ -19,6 +19,17 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, declaratio
 ORPHAN_NODE_GRACE_DAYS = 7
 
 
+def _decode_metadata(raw) -> dict:
+    """Decode the episode metadata column, tolerating NULL/corrupt legacy rows."""
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def parse_utc(value) -> datetime:
     """Parse a SQLite timestamp, treating naive values as UTC.
 
@@ -187,6 +198,14 @@ class Database:
                 "SELECT id FROM episodes WHERE content = ?", (content,)
             ).fetchone()
             return row[0] if row else None
+
+    def episode_exists(self, ep_id: str) -> bool:
+        """True if the episode row exists; vectors may outlive their rows."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM episodes WHERE id = ?", (ep_id,)
+            ).fetchone()
+            return row is not None
 
     def reinforce_episode(self, ep_id: str, salience_step: float = 0.05) -> bool:
         """The fact was repeated: bump salience and refresh recency."""
@@ -409,7 +428,7 @@ class Database:
             return {
                 row[0]: {
                     "salience": row[1],
-                    "metadata": json.loads(row[2]),
+                    "metadata": _decode_metadata(row[2]),
                     "timestamp": row[3],
                 }
                 for row in cursor.fetchall()

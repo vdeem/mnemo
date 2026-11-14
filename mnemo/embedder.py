@@ -103,25 +103,45 @@ class Embedder:
             return
         self.collection.delete(ids=ids)
 
-    def ensure_ids(self, episodes: list[dict]):
-        """Backfill vectors for episodes missing from this collection.
+    def contains(self, ep_id: str) -> bool:
+        """True if the vector index holds this episode id."""
+        return bool(self.collection.get(ids=[ep_id]).get("ids"))
 
-        Runs after a model switch: SQLite stays the source of truth, Chroma is
-        just the index.
-        """
-        if not episodes:
-            return 0
+    def _existing_ids(self) -> set[str]:
+        return set(self.collection.get().get("ids") or [])
 
-        existing = set(self.collection.get().get("ids") or [])
+    def _add_missing(self, episodes: list[dict], existing: set[str]) -> int:
         missing = [e for e in episodes if e["id"] not in existing]
         if not missing:
             return 0
-
-        added = 0
         for batch in _batches(missing):
             self.add(
                 ids=[e["id"] for e in batch],
                 documents=[e["content"] for e in batch],
             )
-            added += len(batch)
-        return added
+        return len(missing)
+
+    def ensure_ids(self, episodes: list[dict]):
+        """Backfill vectors for episodes missing from this collection.
+
+        Runs after a model switch: SQLite stays the source of truth, Chroma is
+        just the index. This only adds vectors; use :meth:`reconcile` for a
+        full source-of-truth sync that also drops orphans.
+        """
+        if not episodes:
+            return 0
+        return self._add_missing(episodes, self._existing_ids())
+
+    def reconcile(self, episodes: list[dict]) -> tuple[int, int]:
+        """Align the vector index with SQLite: add missing, drop orphans.
+
+        A vector whose episode row is gone is a crash artifact or a stale
+        store, and must never be served by ``recall``. Returns
+        ``(added, pruned)``.
+        """
+        existing = self._existing_ids()
+        valid = {e["id"] for e in episodes}
+        stale = sorted(existing - valid)
+        if stale:
+            self.delete(stale)
+        return self._add_missing(episodes, existing), len(stale)

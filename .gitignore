@@ -11,6 +11,7 @@ pycache/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.pytest_tmp/
 .coverage
 htmlcov/
 coverage.xml
@@ -28,6 +29,8 @@ test_decay
 test_mnemo
 mnemo_mcp_chroma
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 *_chroma/

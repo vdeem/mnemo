@@ -16,6 +16,7 @@
 - **Download spaCy model (once):** `python -m spacy download en_core_web_sm`
 - **Run all tests:** `pytest -q` (must stay green after every change)
 - **Run a single test file:** `pytest -q tests/test_extraction.py`
+- **Windows/sandboxed temp:** if `%TEMP%` is not writable, `tests/conftest.py` moves pytest's temp root to `.pytest_tmp/` (gitignored); force it with `pytest -q --basetemp=.pytest_tmp`.
 - **Start MCP server (stdio):** `python -m mnemo.server`
 - **End-to-end MCP smoke test:** `python test_mcp_client.py` (spawns the server as a subprocess, so it needs unrestricted process/pipe creation)
 - **MCP protocol/security check (before any release):** `mcpdoctor`

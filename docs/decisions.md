@@ -77,3 +77,28 @@ of code.
 - `balanced` reproduces the Phase 0 scores exactly, so existing behaviour and
   tests are unchanged.
 
+## ADR-006 — Markdown agent brief alongside the graph
+
+**Decision:** after a consolidation pass that processed at least one episode,
+write `.mnemo/AGENT_CONTEXT.md` in the CWD: recent typed activity, strongest
+connections, and active concepts, rendered from SQLite. `Mnemo.render_brief()`
+returns the same Markdown without writing.
+
+**Why:** plain RAG hands an agent chunks on demand but no cheap overview of what
+memory currently holds. A small deterministic Markdown file can be pasted into
+any system prompt, read by a non-MCP agent, and diffed in git. It is a projection
+of the graph, not a second source of truth.
+
+**Consequences:**
+
+- `co_occurs` edges and generic nouns are excluded: the brief shows facts, not
+  the implicit mesh.
+- The `_Generated:` stamp is the newest data timestamp, not wall-clock time, so
+  an unchanged graph produces byte-identical output; wall-clock stamps would
+  turn every run into a git diff.
+- Writes are skipped when consolidation processed nothing; `.mnemo/` is
+  gitignored. Callers can opt out with `write_brief=False` or redirect with
+  `brief_path=...`.
+- Rendering is read-only: no schema changes and no writes besides the brief.
+
+

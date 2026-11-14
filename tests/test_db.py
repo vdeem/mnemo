@@ -42,6 +42,73 @@ def test_get_or_create_node_stores_display_name(db, tmp_db_path):
     assert row == ("Jack", "PERSON")
 
 
+def test_get_strongest_edges_orders_and_excludes_cooccurrence(db):
+    alice = db.get_or_create_node("alice")
+    bob = db.get_or_create_node("bob")
+    carol = db.get_or_create_node("carol")
+    db.reinforce_edge(alice, bob, relation="knows")
+    db.reinforce_edge(alice, carol, relation="co_occurs")
+    db.reinforce_edge(alice, carol, relation="likes")
+    db.reinforce_edge(alice, carol, relation="likes")
+
+    strongest = db.get_strongest_edges(10)
+
+    assert [(e["source"], e["relation"], e["target"]) for e in strongest] == [
+        ("alice", "likes", "carol"),
+        ("alice", "knows", "bob"),
+    ]
+    assert strongest[0]["weight"] == 2.0
+
+
+def test_get_recent_edges_orders_by_last_reinforced(db, tmp_db_path):
+    alice = db.get_or_create_node("alice")
+    bob = db.get_or_create_node("bob")
+    carol = db.get_or_create_node("carol")
+    db.reinforce_edge(alice, bob, relation="knows")
+    db.reinforce_edge(alice, carol, relation="likes")
+    db.reinforce_edge(alice, carol, relation="co_occurs")
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.execute(
+            "UPDATE edges SET last_reinforced = '2024-01-01 00:00:00' "
+            "WHERE relation = 'knows'"
+        )
+        conn.execute(
+            "UPDATE edges SET last_reinforced = '2024-06-01 00:00:00' "
+            "WHERE relation = 'likes'"
+        )
+        conn.commit()
+
+    recent = db.get_recent_edges(10)
+
+    assert [(e["relation"], e["target"]) for e in recent] == [
+        ("likes", "carol"),
+        ("knows", "bob"),
+    ]
+
+
+def test_get_active_nodes_excludes_generic_nouns(db, tmp_db_path):
+    db.get_or_create_node("alice", "PERSON", display_name="Alice")
+    db.get_or_create_node("user")
+    db.get_or_create_node("thing")
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.execute(
+            "UPDATE nodes SET last_seen = '2024-01-01 00:00:00' WHERE name = 'alice'"
+        )
+        conn.execute(
+            "UPDATE nodes SET last_seen = '2024-06-01 00:00:00' "
+            "WHERE name IN ('user', 'thing')"
+        )
+        conn.commit()
+
+    active = db.get_active_nodes(10)
+
+    assert [node["name"] for node in active] == ["alice"]
+    assert active[0]["display_name"] == "Alice"
+    assert active[0]["node_type"] == "PERSON"
+
+
 def test_delete_episodes(db):
     ep_id = db.add_episode("temp")
     assert db.delete_episodes([ep_id]) == 1

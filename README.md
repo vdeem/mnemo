@@ -22,6 +22,7 @@ Mnemo takes a different approach: **cognitive consolidation**. It uses local NLP
 - **Lightweight** — Runs on consumer hardware, no GPU required.
 - **Forgetting (Decay)** — Old, unreinforced connections fade away and are archived, preventing database bloat and keeping only the most relevant memories.
 - **Idempotent Consolidation** — Each episode is consolidated once; re-running `consolidate()` never inflates edge weights.
+- **Agent brief** — After consolidation, Mnemo writes `.mnemo/AGENT_CONTEXT.md`, a human- and agent-readable summary of the current graph. Any agent (MCP or not) can read it at session start.
 
 ## Installation
 

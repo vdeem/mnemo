@@ -5,6 +5,8 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+from ._constants import GENERIC_NOUNS
+
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, declaration: str):
     """Idempotent `ALTER TABLE ... ADD COLUMN` for pre-existing databases."""
@@ -316,6 +318,83 @@ class Database:
                 {"source": row[0], "relation": row[1], "target": row[2], "weight": row[3]} 
                 for row in cursor.fetchall()
             ]
+
+    def _edge_rows(self, order_by: str, limit: int,
+                   exclude_relations: tuple[str, ...]) -> list:
+        """Edges with both endpoints joined; ordering is a static SQL fragment."""
+        params: list = []
+        where = ""
+        if exclude_relations:
+            placeholders = ",".join("?" * len(exclude_relations))
+            where = f"WHERE e.relation NOT IN ({placeholders})"
+            params.extend(exclude_relations)
+        params.append(limit)
+
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT n1.name, e.relation, n2.name, e.weight
+                FROM edges e
+                JOIN nodes n1 ON e.source_id = n1.id
+                JOIN nodes n2 ON e.target_id = n2.id
+                {where}
+                {order_by}
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+
+        return [
+            {"source": row[0], "relation": row[1], "target": row[2], "weight": row[3]}
+            for row in rows
+        ]
+
+    def get_strongest_edges(
+        self,
+        limit: int = 20,
+        exclude_relations: tuple[str, ...] = ("co_occurs",),
+    ) -> list:
+        """Highest-weight edges first (same shape as get_graph_context)."""
+        return self._edge_rows(
+            "ORDER BY e.weight DESC, e.last_reinforced DESC, "
+            "n1.name ASC, n2.name ASC",
+            limit,
+            exclude_relations,
+        )
+
+    def get_recent_edges(
+        self,
+        limit: int = 20,
+        exclude_relations: tuple[str, ...] = ("co_occurs",),
+    ) -> list:
+        """Most recently reinforced edges first (same shape as get_graph_context)."""
+        return self._edge_rows(
+            "ORDER BY e.last_reinforced DESC, e.weight DESC, "
+            "n1.name ASC, n2.name ASC",
+            limit,
+            exclude_relations,
+        )
+
+    def get_active_nodes(self, limit: int = 20) -> list:
+        """Most recently seen nodes, generic nouns excluded."""
+        names = sorted(GENERIC_NOUNS)
+        placeholders = ",".join("?" * len(names))
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT name, display_name, node_type, last_seen FROM nodes "
+                f"WHERE name NOT IN ({placeholders}) "
+                "ORDER BY last_seen DESC, name ASC LIMIT ?",
+                (*names, limit),
+            ).fetchall()
+        return [
+            {
+                "name": row[0],
+                "display_name": row[1],
+                "node_type": row[2],
+                "last_seen": row[3],
+            }
+            for row in rows
+        ]
         
     def get_episode_details(self, ids: list) -> dict:
         """Fetch salience, metadata and timestamp for a list of episode IDs."""

@@ -3,7 +3,9 @@ import math
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
+from .brief import render_brief as _render_brief
 from .consolidator import Consolidator
 from .db import Database, parse_utc
 from .embedder import Embedder
@@ -106,15 +108,30 @@ class Mnemo:
             return True
         return False
 
-    def consolidate(self, limit=50):
-        """Run “Sieve” over episodes it has not seen yet (call hourly or on exit)."""
+    def consolidate(self, limit=50, write_brief: bool = True,
+                    brief_path: str | None = None):
+        """Run “Sieve” over episodes it has not seen yet (call hourly or on exit).
+
+        After a pass that processed at least one episode, writes the Markdown
+        agent brief (``.mnemo/AGENT_CONTEXT.md`` in the CWD by default, or
+        ``brief_path``) so a non-MCP agent can read the memory state at startup.
+        """
         episodes = self.db.get_unconsolidated_episodes(limit)
         if not episodes:
             return 0
         processed = self.consolidator.consolidate(episodes, self.db)
         if processed:
             self.db.mark_consolidated([ep["id"] for ep in episodes[:processed]])
+            if write_brief:
+                path = Path(brief_path) if brief_path else Path(".mnemo") / "AGENT_CONTEXT.md"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(self.render_brief(), encoding="utf-8", newline="\n")
+                log.info("wrote agent brief to %s", path)
         return processed
+
+    def render_brief(self) -> str:
+        """Markdown summary of the current graph; does not touch the disk."""
+        return _render_brief(self.db)
 
     def decay(self, decay_rate: float = 0.1, threshold: float = 0.05):
         """

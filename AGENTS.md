@@ -29,10 +29,12 @@ README.md # public readme
 pyproject.toml # packaging + deps
 requirements.txt # mirror of deps for pip install -r
 mnemo/
-core.py # Public API: Mnemo.add / recall / consolidate / decay / delete
+core.py # Public API: Mnemo.add / recall / consolidate / decay / delete, RecallWeights
+brief.py # Markdown agent-context brief renderer
 db.py # SQLite layer: schema, edges, nodes, episodes, decay, orphan cleanup
 embedder.py # ChromaDB + the single SentenceTransformer wrapper
 consolidator.py # spaCy NER, triple extraction, graph writing
+_constants.py # shared constants (GENERIC_NOUNS)
 server.py # MCP (FastMCP) tool wrappers — thin, no business logic
 tests/ # pytest suite (preferred location)
 docs/ # public long-form docs referenced from this file
@@ -64,6 +66,23 @@ Enforce these invariants. If existing code violates one, fix it as part of your 
 - **Public API stability.** Keep `Mnemo.add / recall / consolidate / decay / delete` signatures backward-compatible within `0.x`. Optional kwargs are fine; renames need a deprecation path.
 - **Typing.** All public functions annotated. No `Any` without a docstring justification.
 
+## Agent context brief
+
+`Mnemo.consolidate()` writes `.mnemo/AGENT_CONTEXT.md` (relative to the CWD) after
+a pass that processed at least one episode. The brief is human-readable Markdown
+with recent typed activity, strongest connections, and the most recently active
+concepts, so any agent — MCP-capable or not — can read the memory state at
+session start. It is a projection of SQLite, never a second source of truth.
+
+- `consolidate(write_brief=False)` skips the write; `consolidate(brief_path="...")`
+  writes elsewhere. A no-op consolidation (0 processed) never rewrites the file.
+- `Mnemo.render_brief()` returns the same Markdown without touching the disk.
+- `co_occurs` edges are excluded everywhere in the brief: they are the noisy
+  implicit mesh, not facts. Generic nouns are excluded from concepts.
+- The `_Generated:` line carries the newest data timestamp, not wall-clock time,
+  so unchanged state yields byte-identical output (git-diffable).
+- `.mnemo/` is gitignored; never commit generated briefs.
+
 ## Boundaries (STRICT)
 
 - **NEVER** add an external LLM API call (OpenAI, Anthropic, Google, …) — it destroys the project's core value proposition.
@@ -81,7 +100,8 @@ Enforce these invariants. If existing code violates one, fix it as part of your 
   - `tests/test_extraction.py` — pure spaCy rules: triples, lemmatization, pronoun/generic filtering, display names and node types.
   - `tests/test_db.py` — schema + idempotent migrations, episode/node/edge CRUD, UTC parsing, orphan cleanup.
   - `tests/test_consolidation.py` — end-to-end `Mnemo.consolidate()`: counts, graph build, idempotency, decay/archiving, co-occurrence bounds.
-  - `tests/test_recall.py` — similarity-driven recall, `max_distance`, duplicate add/upsert, startup reindex.
+  - `tests/test_recall.py` — similarity-driven recall, `max_distance`, `RecallWeights` presets/env precedence, duplicate add/upsert, startup reindex.
+  - `tests/test_brief.py` — Markdown brief rendering: empty graph, typed triples only, deterministic bytes, write-on-consolidate and skip-on-no-op.
 - `test_mcp_client.py` at the repo root is an **end-to-end MCP smoke test**, not a unit test. Run it manually before releases; do not add it to `tests/`.
 - `test_new.py` and `test_mnemo.py` were removed; their scenarios now live in `tests/` above. Do not recreate them at the repo root.
 - Minimum coverage before any release:
@@ -91,6 +111,7 @@ Enforce these invariants. If existing code violates one, fix it as part of your 
   - `decay` reduces weights and archives edges below threshold.
   - `recall` returns non-empty for an exact-match query and honours `max_distance`.
   - `RecallWeights` presets actually change ranking (`balanced` vs `emotional`), and env/explicit precedence holds.
+  - The agent brief excludes `co_occurs`, is deterministic, and is not rewritten by a no-op consolidation.
 - Run `pytest -q` and `python test_mcp_client.py` before declaring a task done.
 
 ## Docs (Progressive Disclosure)

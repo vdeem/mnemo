@@ -12,28 +12,13 @@ from itertools import combinations, islice
 import spacy
 from spacy.cli import download as spacy_download
 
+from ._constants import GENERIC_NOUNS
+
 log = logging.getLogger(__name__)
 
 # spaCy labels that describe a concept worth a node. Date/time/quantity labels
 # would flood the graph with one-off nodes.
 ENTITY_LABELS = {"PERSON", "ORG", "GPE", "PRODUCT", "EVENT"}
-
-# Nouns too vague to connect anything: keeping them turns the graph into a hub
-# where unrelated episodes are linked through "thing" or "user".
-GENERIC_NOUNS = {
-    "thing",
-    "way",
-    "today",
-    "tomorrow",
-    "yesterday",
-    "project",
-    "user",
-    "someone",
-    "anyone",
-    "everything",
-    "something",
-    "nothing",
-}
 
 # A sentence with many entities is usually a list, not a claim about how they
 # relate, so cap the quadratic pair explosion.

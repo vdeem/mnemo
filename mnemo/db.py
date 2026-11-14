@@ -248,18 +248,25 @@ class Database:
             )
             return [{"id": row[0], "content": row[1]} for row in cursor.fetchall()]
 
-    def mark_consolidated(self, ids: list) -> int:
-        """Stamp episodes as consolidated; they are skipped by later runs."""
+    def mark_consolidated(self, ids: list,
+                          conn: sqlite3.Connection | None = None) -> int:
+        """Stamp episodes as consolidated; they are skipped by later runs.
+
+        Pass ``conn`` to mark inside the same transaction as the episode's
+        graph writes. Otherwise a crash can commit edges for an episode that
+        still looks unconsolidated, and the next run doubles those weights.
+        """
         if not ids:
             return 0
         placeholders = ",".join("?" * len(ids))
-        with self._conn() as conn:
-            cursor = conn.execute(
-                f"UPDATE episodes SET consolidated_at = CURRENT_TIMESTAMP "
-                f"WHERE id IN ({placeholders})",
-                ids,
-            )
-            return cursor.rowcount
+        sql = (
+            f"UPDATE episodes SET consolidated_at = CURRENT_TIMESTAMP "
+            f"WHERE id IN ({placeholders})"
+        )
+        if conn is not None:
+            return conn.execute(sql, ids).rowcount
+        with self._conn() as own:
+            return own.execute(sql, ids).rowcount
 
     def get_or_create_node(self, name: str, node_type: str = "entity",
                            display_name: str | None = None,

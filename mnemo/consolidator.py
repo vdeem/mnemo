@@ -214,6 +214,11 @@ class Consolidator:
                         episode_id=episode["id"],
                     )
 
+                # Mark inside the write transaction: a crash must not leave
+                # committed edges on an episode that still looks unconsolidated,
+                # or the next run would double its weights.
+                db.mark_consolidated([episode["id"]], conn=conn)
+
             processed += 1
 
         return processed

@@ -3,6 +3,8 @@
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from mnemo.consolidator import MAX_COOCCURRENCE_PAIRS
 
 
@@ -54,6 +56,43 @@ def test_consolidate_is_idempotent(mnemo, tmp_db_path):
 
     assert mnemo.consolidate() == 0
     assert _total_edge_weight(tmp_db_path) == weight_after_first_run
+
+
+def test_partial_consolidation_is_resumable(mnemo, tmp_db_path):
+    """A crash must not leave committed edges on an unmarked episode."""
+    for text in ["Zed knows Yan.", "Yan knows Xin.", "Xin knows Zed."]:
+        mnemo.add(text, dedupe=False)
+
+    original = mnemo.consolidator._triples
+    calls = {"count": 0}
+
+    def crash_on_second(doc):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise RuntimeError("simulated crash")
+        return original(doc)
+
+    mnemo.consolidator._triples = crash_on_second
+    try:
+        with pytest.raises(RuntimeError):
+            mnemo.consolidate(write_brief=False)
+    finally:
+        mnemo.consolidator._triples = original
+
+    # Episode 1 committed and was marked in the same transaction; episode 2
+    # rolled back completely; episode 3 was never touched.
+    remaining = [
+        episode["content"] for episode in mnemo.db.get_unconsolidated_episodes(10)
+    ]
+    assert remaining == ["Yan knows Xin.", "Xin knows Zed."]
+
+    assert mnemo.consolidate(write_brief=False) == 2
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        weights = conn.execute(
+            "SELECT weight FROM edges WHERE relation = 'know' ORDER BY weight"
+        ).fetchall()
+    assert weights == [(1.0,), (1.0,), (1.0,)]
 
 
 def test_consolidate_marks_episodes(mnemo):

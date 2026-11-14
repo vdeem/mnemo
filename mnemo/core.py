@@ -129,6 +129,10 @@ class Mnemo:
                     brief_path: str | None = None):
         """Run “Sieve” over episodes it has not seen yet (call hourly or on exit).
 
+        The consolidator marks each episode inside its own write transaction,
+        so a crash mid-pass leaves finished episodes marked and unfinished ones
+        untouched: the next call resumes instead of double-counting weights.
+
         After a pass that processed at least one episode, writes the Markdown
         agent brief (``.mnemo/AGENT_CONTEXT.md`` in the CWD by default, or
         ``brief_path``) so a non-MCP agent can read the memory state at startup.
@@ -138,7 +142,6 @@ class Mnemo:
             return 0
         processed = self.consolidator.consolidate(episodes, self.db)
         if processed:
-            self.db.mark_consolidated([ep["id"] for ep in episodes[:processed]])
             if write_brief:
                 path = Path(brief_path) if brief_path else Path(".mnemo") / "AGENT_CONTEXT.md"
                 path.parent.mkdir(parents=True, exist_ok=True)

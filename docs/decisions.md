@@ -55,3 +55,25 @@ class as the previous one, so storage and query cost are unchanged.
 - e5 requires different prefixes per side: `passage: ` when indexing and
   `query: ` when searching. Both paths live in `Embedder`; keep them in sync.
 - Changing the model again requires this file, a default change, and a backfill.
+
+## ADR-005 — configurable recall weights (`RecallWeights`)
+
+**Decision:** the salience/valence/recency multipliers of `recall()` live in a
+`RecallWeights` dataclass with named presets (`balanced`, `emotional`). They can
+be selected per instance (`Mnemo(weights=...)`) or by environment variable
+(`MNEMO_RECALL_PRESET`). Semantic similarity keeps its unit weight.
+
+**Why:** Tera needs emotional dominance (salience + valence) while the sold
+skill needs semantic-similarity dominance. Hardcoded weights force either
+product to fork `recall()`; with a seam, ranking policy is configuration instead
+of code.
+
+**Consequences:**
+
+- Resolution order: explicit `weights=` → `MNEMO_RECALL_PRESET` → `balanced`.
+  An unknown preset name raises `ValueError` at construction (fail fast).
+- `PRESETS` holds shared instances: treat them as read-only, or build a new
+  `RecallWeights` before customising.
+- `balanced` reproduces the Phase 0 scores exactly, so existing behaviour and
+  tests are unchanged.
+

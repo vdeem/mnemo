@@ -1,6 +1,7 @@
 import logging
 import math
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from .consolidator import Consolidator
@@ -10,8 +11,54 @@ from .embedder import Embedder
 log = logging.getLogger(__name__)
 
 
+@dataclass
+class RecallWeights:
+    """Multipliers for the non-semantic signals in ``recall()``.
+
+    Semantic similarity always keeps its unit weight; these add a bonus on top.
+    Keep them well below 1.0 unless a use case deliberately wants salience or
+    mood to outrank semantics (see ``PRESETS["emotional"]``).
+    """
+
+    salience: float = 0.10
+    valence: float = 0.25
+    recency: float = 0.10
+    recency_halflife_days: float = 45.0
+
+
+PRESETS: dict[str, RecallWeights] = {
+    "balanced": RecallWeights(),
+    "emotional": RecallWeights(
+        salience=0.70,
+        valence=1.00,
+        recency=0.10,
+        recency_halflife_days=45.0,
+    ),
+}
+
+RECALL_PRESET_ENV = "MNEMO_RECALL_PRESET"
+
+
+def _weights_from_env() -> RecallWeights | None:
+    """Resolve ``MNEMO_RECALL_PRESET``; unknown names fail fast and loud."""
+    name = (os.getenv(RECALL_PRESET_ENV) or "").strip().lower()
+    if not name:
+        return None
+    try:
+        return PRESETS[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown {RECALL_PRESET_ENV}={name!r}; expected one of {sorted(PRESETS)}"
+        ) from None
+
+
 class Mnemo:
-    def __init__(self, db_path="mnemo.db", chroma_path="./chroma_db"):
+    def __init__(self, db_path="mnemo.db", chroma_path="./chroma_db",
+                 weights: RecallWeights | None = None):
+        # Explicit weights beat the environment preset, which beats balanced.
+        if weights is None:
+            weights = _weights_from_env() or RecallWeights()
+        self.weights = weights
         self.db = Database(db_path)
         self.embedder = Embedder(db_path=chroma_path)
         self.consolidator = Consolidator()
@@ -88,9 +135,11 @@ class Mnemo:
         """Hybrid recall: vector search, filtered and re-ranked.
 
         Ranking is dominated by semantic similarity. Salience is only a small
-        tie-breaker, mood alignment is a moderate bonus, and recency decays.
-        Episodes farther than max_distance are dropped entirely, so "nothing
-        relevant" is a normal, honest answer instead of noise.
+        tie-breaker, mood alignment is a moderate bonus, and recency decays —
+        all according to ``self.weights`` (``RecallWeights``), so a deployment
+        can trade semantic precision for emotional salience. Episodes farther
+        than max_distance are dropped entirely, so "nothing relevant" is a
+        normal, honest answer instead of noise.
         """
         if max_distance is None:
             max_distance = float(os.getenv("MNEMO_MAX_DISTANCE", "1.0"))
@@ -101,6 +150,7 @@ class Mnemo:
 
         details = self.db.get_episode_details([ep["id"] for ep in raw_episodes])
         now = datetime.now(timezone.utc)
+        weights = self.weights
 
         scored_episodes = []
         for ep in raw_episodes:
@@ -115,12 +165,12 @@ class Mnemo:
             meta = det.get("metadata") or {}
 
             score = similarity
-            score += 0.10 * salience  # tie-breaker, not the driver
+            score += weights.salience * salience  # tie-breaker, not the driver
 
             if current_valence is not None and "valence" in meta:
                 try:
                     gap = abs(float(current_valence) - float(meta["valence"]))
-                    score += 0.25 * (1.0 - gap / 2.0)
+                    score += weights.valence * (1.0 - gap / 2.0)
                 except (TypeError, ValueError):
                     pass
 
@@ -131,7 +181,9 @@ class Mnemo:
                         0.0,
                         (now - parse_utc(timestamp)).total_seconds() / 86400.0,
                     )
-                    score += 0.10 * math.exp(-age_days / 45.0)
+                    score += weights.recency * math.exp(
+                        -age_days / weights.recency_halflife_days
+                    )
                 except (TypeError, ValueError):
                     pass
 

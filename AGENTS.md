@@ -60,6 +60,7 @@ Enforce these invariants. If existing code violates one, fix it as part of your 
 - **No `print()` in library code.** Use `logging.getLogger(__name__)`. `print` is allowed only in `server.py` startup paths and CLI entrypoints.
 - **Chroma lifecycle.** `Mnemo.close()` must call Chroma's refcounted `client.close()`. Calling `client._system.stop()` directly leaves a stopped system cached for that path, and reopening the same store in-process then fails with "Could not connect to tenant".
 - **MCP tools are thin wrappers.** `server.py` tools parse args, call `Mnemo`, serialize the result. No NLP, no SQL, no business rules there.
+- **Configurable recall weights.** The salience/valence/recency multipliers used by `recall()` live in `RecallWeights` (`mnemo/core.py`, exported from the `mnemo` package) with named `PRESETS` (`balanced`, `emotional`). Never reintroduce hardcoded numbers there. Resolution order: explicit `Mnemo(weights=...)` → `MNEMO_RECALL_PRESET` env var (unknown names raise `ValueError`) → `balanced`. Semantic similarity keeps its unit weight; `recency_halflife_days` feeds the existing `exp(-age_days / value)` decay (45.0 preserves the Phase 0 scores).
 - **Public API stability.** Keep `Mnemo.add / recall / consolidate / decay / delete` signatures backward-compatible within `0.x`. Optional kwargs are fine; renames need a deprecation path.
 - **Typing.** All public functions annotated. No `Any` without a docstring justification.
 
@@ -89,6 +90,7 @@ Enforce these invariants. If existing code violates one, fix it as part of your 
   - Duplicate `add()` of the same text does not raise and does not duplicate the episode.
   - `decay` reduces weights and archives edges below threshold.
   - `recall` returns non-empty for an exact-match query and honours `max_distance`.
+  - `RecallWeights` presets actually change ranking (`balanced` vs `emotional`), and env/explicit precedence holds.
 - Run `pytest -q` and `python test_mcp_client.py` before declaring a task done.
 
 ## Docs (Progressive Disclosure)

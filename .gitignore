@@ -32,6 +32,13 @@ mnemo_mcp_chroma
 *.sqlite3
 *_chroma/
 test_chroma_triples
+# Generated memory state
+.mnemo/
+# Markdown by default, docs and the agent guide are public
+*.md
 # Exceptions
 !README.md
 !requirements.txt
+!AGENTS.md
+!docs/*.md
+!docs/**/*.md

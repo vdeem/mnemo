@@ -14,9 +14,10 @@ Mnemo takes a different approach: **cognitive consolidation**. It uses local NLP
 
 ## Features
 
-- **Zero-LLM Extraction** — Uses spaCy for lemmatized entities and dependency-parsed triples; no OpenAI call, ever.
-- **Multilingual Retrieval** — Vectors come from `intfloat/multilingual-e5-small`, so a Chinese query can recall an English memory. (Extraction itself is English-only via `en_core_web_sm`.)
-- **Hybrid Retrieval** — Combines vector similarity (episodic memory) with graph traversal (semantic memory); a `max_distance` threshold drops weak matches instead of returning noise.
+- **Zero-LLM Extraction** — spaCy NER plus dependency-based triple extraction and lemmatization build the graph. No clustering, no second encoder, no OpenAI call, ever.
+- **Multilingual by default** — Vectors come from `intfloat/multilingual-e5-small` (override with `MNEMO_EMBED_MODEL`), so a Chinese query can recall an English memory. Extraction itself stays English-only via `en_core_web_sm`.
+- **Hybrid Retrieval** — Combines vector similarity (episodic memory) with graph traversal (semantic memory).
+- **Honest retrieval** — A `max_distance` threshold cuts weak matches, so "nothing relevant" is a valid answer instead of noise.
 - **Local-First** — SQLite and ChromaDB on your disk.
 - **Lightweight** — Runs on consumer hardware, no GPU required.
 - **Forgetting (Decay)** — Old, unreinforced connections fade away and are archived, preventing database bloat and keeping only the most relevant memories.
@@ -71,7 +72,8 @@ mnemo.delete([episode_id])
 - [x] Decay & forgetting algorithm
 - [x] MCP (Model Context Protocol) server
 - [x] Multilingual embeddings (`intfloat/multilingual-e5-small`)
-- [ ] Multilingual spaCy extraction (retrieval is multilingual today; extraction is English-only)
+- [~] Multi-language support — partial: retrieval is multilingual, spaCy extraction is still English-only
+- [ ] Phase 2 — Agent context brief and RAG adapters
 
 ## License
 

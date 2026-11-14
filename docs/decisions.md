@@ -35,8 +35,8 @@ longer loads one and no longer clusters episodes with DBSCAN.
 **Why:** the second encoder doubled startup time and memory for a clustering
 label nothing consumed; `scikit-learn` and `networkx` are now unused.
 
-**Consequences:** startup is cheaper; the unused deps remain in
-`requirements.txt` until a dependency-change commit removes them.
+**Consequences:** startup is cheaper; the unused deps were removed from
+`pyproject.toml` and `requirements.txt` in a dedicated dependency commit.
 
 ## ADR-004 — embedding model: `intfloat/multilingual-e5-small`
 

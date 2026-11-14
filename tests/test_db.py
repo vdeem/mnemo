@@ -1,8 +1,9 @@
 """Database-level unit tests."""
 
 import sqlite3
+from datetime import datetime, timezone
 
-from mnemo.db import Database
+from mnemo.db import Database, parse_utc
 
 
 def test_add_episode_is_idempotent(db):
@@ -45,6 +46,14 @@ def test_delete_episodes(db):
     ep_id = db.add_episode("temp")
     assert db.delete_episodes([ep_id]) == 1
     assert db.episode_id_for("temp") is None
+
+
+def test_parse_utc_treats_naive_timestamps_as_utc():
+    naive = parse_utc("2024-01-02 03:04:05")
+    assert naive == datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+    aware = parse_utc("2024-01-02T05:04:05+02:00")
+    assert aware == datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 
 
 def test_unconsolidated_episodes_exclude_marked_rows(db):

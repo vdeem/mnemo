@@ -1,10 +1,13 @@
+import logging
 import math
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .consolidator import Consolidator
-from .db import Database
+from .db import Database, parse_utc
 from .embedder import Embedder
+
+log = logging.getLogger(__name__)
 
 
 class Mnemo:
@@ -41,7 +44,7 @@ class Mnemo:
         try:
             similar = self.embedder.find_similar(text, k=1)
         except Exception as e:
-            print(f"[mnemo] dedupe check failed: {e}")
+            log.warning("dedupe check failed: %s", e)
             return False
         if not similar:
             return False
@@ -93,7 +96,7 @@ class Mnemo:
             return {"episodes": [], "facts": []}
 
         details = self.db.get_episode_details([ep["id"] for ep in raw_episodes])
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         scored_episodes = []
         for ep in raw_episodes:
@@ -122,8 +125,7 @@ class Mnemo:
                 try:
                     age_days = max(
                         0.0,
-                        (now - datetime.fromisoformat(str(timestamp)))
-                        .total_seconds() / 86400.0,
+                        (now - parse_utc(timestamp)).total_seconds() / 86400.0,
                     )
                     score += 0.10 * math.exp(-age_days / 45.0)
                 except (TypeError, ValueError):

@@ -1,8 +1,9 @@
 import sqlite3
 import json
+import math
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, declaration: str):
@@ -12,23 +13,55 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, declaratio
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
 
+def parse_utc(value) -> datetime:
+    """Parse a SQLite timestamp, treating naive values as UTC.
+
+    SQLite's CURRENT_TIMESTAMP is UTC but comes back without a tzinfo; without
+    attaching it, subtracting it from an aware ``now`` raises or is wrong.
+    """
+    parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _configure(conn: sqlite3.Connection) -> None:
+    """Every connection gets the same durability/concurrency settings."""
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA foreign_keys=ON")
+
+
 class Database:
     def __init__(self, db_path="mnemo.db"):
         self.db_path = db_path
         self._init_db()
 
     def _get_conn(self):
-        return sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        _configure(conn)
+        return conn
 
     @contextmanager
     def _conn(self):
         """Open/commit/close explicitly: Windows keeps .db locked otherwise."""
         conn = sqlite3.connect(self.db_path)
+        _configure(conn)
         try:
             yield conn
             conn.commit()
         finally:
             conn.close()
+
+    @contextmanager
+    def batch(self):
+        """One connection/transaction for a multi-row write batch.
+
+        Consolidation writes hundreds of nodes and edges per run; a connection
+        per row would pay the PRAGMA/locking cost every time.
+        """
+        with self._conn() as conn:
+            yield conn
 
     def decay_edges(self, decay_rate: float = 0.1, threshold: float = 0.05, archive: bool = True):
         """
@@ -39,11 +72,7 @@ class Database:
         :param archive: If True, edges are moved to the archive instead of being deleted.
         :return: The number of edges affected.
         """
-        import math
-        from datetime import datetime
-
-        # Get the current time
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         with self._conn() as conn:
             # Get all edges and their last_reinforced timestamps
@@ -52,9 +81,9 @@ class Database:
 
             affected = 0
             for edge_id, weight, last_reinforced_str in edges:
-                # Parse the timestamp (SQLite stores it as a string)
+                # Parse the timestamp (SQLite stores it as a naive UTC string)
                 try:
-                    last_reinforced = datetime.fromisoformat(last_reinforced_str)
+                    last_reinforced = parse_utc(last_reinforced_str)
                 except (ValueError, TypeError):
                     last_reinforced = now  # If parsing fails, assume it was reinforced just now
 
@@ -199,55 +228,73 @@ class Database:
             return cursor.rowcount
 
     def get_or_create_node(self, name: str, node_type: str = "entity",
-                           display_name: str | None = None) -> str:
+                           display_name: str | None = None,
+                           conn: sqlite3.Connection | None = None) -> str:
         """Return the node id for a normalized name, creating it if needed.
 
         ``name`` is the graph key (lowercase lemma); ``display_name`` preserves
-        the original casing for humans and defaults to ``name``.
+        the original casing for humans and defaults to ``name``. Pass ``conn``
+        to join an existing transaction from :meth:`batch`.
         """
         name = name.lower().strip()
         display = (display_name or name).strip() or name
-        with self._conn() as conn:
-            cursor = conn.execute("SELECT id FROM nodes WHERE name = ?", (name,))
-            row = cursor.fetchone()
-            if row:
-                # Fill in the display name for rows created before the column
-                # existed, but never churn it on every consolidation run.
-                conn.execute(
-                    "UPDATE nodes SET last_seen = CURRENT_TIMESTAMP, "
-                    "display_name = COALESCE(display_name, ?) WHERE id = ?",
-                    (display, row[0]),
-                )
-                return row[0]
+        if conn is not None:
+            return self._get_or_create_node(conn, name, node_type, display)
+        with self._conn() as own:
+            return self._get_or_create_node(own, name, node_type, display)
 
-            node_id = str(uuid.uuid4())
+    @staticmethod
+    def _get_or_create_node(conn: sqlite3.Connection, name: str, node_type: str,
+                            display: str) -> str:
+        cursor = conn.execute("SELECT id FROM nodes WHERE name = ?", (name,))
+        row = cursor.fetchone()
+        if row:
+            # Fill in the display name for rows created before the column
+            # existed, but never churn it on every consolidation run.
             conn.execute(
-                "INSERT INTO nodes (id, name, node_type, display_name) "
-                "VALUES (?, ?, ?, ?)",
-                (node_id, name, node_type, display),
+                "UPDATE nodes SET last_seen = CURRENT_TIMESTAMP, "
+                "display_name = COALESCE(display_name, ?) WHERE id = ?",
+                (display, row[0]),
             )
-            return node_id
+            return row[0]
 
-    def reinforce_edge(self, source_id: str, target_id: str, relation: str = "co_occurs"):
+        node_id = str(uuid.uuid4())
+        conn.execute(
+            "INSERT INTO nodes (id, name, node_type, display_name) "
+            "VALUES (?, ?, ?, ?)",
+            (node_id, name, node_type, display),
+        )
+        return node_id
+
+    def reinforce_edge(self, source_id: str, target_id: str, relation: str = "co_occurs",
+                       conn: sqlite3.Connection | None = None):
+        """Bump an edge's weight, creating it on first sight."""
         if source_id == target_id:
             return
-        
-        with self._conn() as conn:
-            cursor = conn.execute(
-                "SELECT id FROM edges WHERE source_id = ? AND target_id = ? AND relation = ?",
-                (source_id, target_id, relation)
+        if conn is not None:
+            self._reinforce_edge(conn, source_id, target_id, relation)
+            return
+        with self._conn() as own:
+            self._reinforce_edge(own, source_id, target_id, relation)
+
+    @staticmethod
+    def _reinforce_edge(conn: sqlite3.Connection, source_id: str, target_id: str,
+                        relation: str) -> None:
+        cursor = conn.execute(
+            "SELECT id FROM edges WHERE source_id = ? AND target_id = ? AND relation = ?",
+            (source_id, target_id, relation)
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.execute(
+                "UPDATE edges SET weight = weight + 1.0, last_reinforced = CURRENT_TIMESTAMP WHERE id = ?",
+                (row[0],)
             )
-            row = cursor.fetchone()
-            if row:
-                conn.execute(
-                    "UPDATE edges SET weight = weight + 1.0, last_reinforced = CURRENT_TIMESTAMP WHERE id = ?",
-                    (row[0],)
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO edges (id, source_id, target_id, relation) VALUES (?, ?, ?, ?)",
-                    (str(uuid.uuid4()), source_id, target_id, relation)
-                )
+        else:
+            conn.execute(
+                "INSERT INTO edges (id, source_id, target_id, relation) VALUES (?, ?, ?, ?)",
+                (str(uuid.uuid4()), source_id, target_id, relation)
+            )
 
     def get_graph_context(self, node_name: str, depth=1) -> list:
         """Returns the node’s connections in the graph."""

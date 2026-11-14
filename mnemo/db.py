@@ -4,6 +4,14 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime
 
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, declaration: str):
+    """Idempotent `ALTER TABLE ... ADD COLUMN` for pre-existing databases."""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+
 class Database:
     def __init__(self, db_path="mnemo.db"):
         self.db_path = db_path
@@ -98,7 +106,8 @@ class Database:
                     content TEXT NOT NULL,
                     salience REAL DEFAULT 0.5,  -- NEW: how vivid is this memory?
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    metadata JSON
+                    metadata JSON,
+                    consolidated_at DATETIME
                 );
                 CREATE TABLE IF NOT EXISTS nodes (
                     id TEXT PRIMARY KEY,
@@ -116,6 +125,9 @@ class Database:
                     UNIQUE(source_id, target_id, relation)
                 );
             """)
+            # Columns added after the first release. ALTER TABLE ... ADD COLUMN
+            # keeps existing user databases usable without rewriting rows.
+            _ensure_column(conn, "episodes", "consolidated_at", "DATETIME")
 
     def add_episode(self, content: str, metadata: dict = None, salience: float = 0.5) -> str:
         with self._conn() as conn:
@@ -156,6 +168,33 @@ class Database:
                 (limit,)
             )
             return [{"id": row[0], "content": row[1]} for row in cursor.fetchall()]
+
+    def get_unconsolidated_episodes(self, limit: int = 50) -> list:
+        """Episodes the Sieve has not processed yet, oldest first.
+
+        Consolidation is a one-shot pass per episode: without this filter every
+        run would re-reinforce the same edges and inflate their weights forever.
+        """
+        with self._conn() as conn:
+            cursor = conn.execute(
+                "SELECT id, content FROM episodes WHERE consolidated_at IS NULL "
+                "ORDER BY timestamp ASC, rowid ASC LIMIT ?",
+                (limit,),
+            )
+            return [{"id": row[0], "content": row[1]} for row in cursor.fetchall()]
+
+    def mark_consolidated(self, ids: list) -> int:
+        """Stamp episodes as consolidated; they are skipped by later runs."""
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        with self._conn() as conn:
+            cursor = conn.execute(
+                f"UPDATE episodes SET consolidated_at = CURRENT_TIMESTAMP "
+                f"WHERE id IN ({placeholders})",
+                ids,
+            )
+            return cursor.rowcount
 
     def get_or_create_node(self, name: str, node_type: str = "entity") -> str:
         name = name.lower().strip()

@@ -1,5 +1,9 @@
 """Database-level unit tests."""
 
+import sqlite3
+
+from mnemo.db import Database
+
 
 def test_add_episode_is_idempotent(db):
     ep1 = db.add_episode("The user likes coffee.")
@@ -30,3 +34,31 @@ def test_delete_episodes(db):
     ep_id = db.add_episode("temp")
     assert db.delete_episodes([ep_id]) == 1
     assert db.episode_id_for("temp") is None
+
+
+def test_unconsolidated_episodes_exclude_marked_rows(db):
+    first = db.add_episode("first")
+    second = db.add_episode("second")
+
+    assert [ep["id"] for ep in db.get_unconsolidated_episodes(10)] == [first, second]
+
+    assert db.mark_consolidated([first]) == 1
+    assert [ep["id"] for ep in db.get_unconsolidated_episodes(10)] == [second]
+
+
+def test_init_db_adds_consolidated_at_to_legacy_table(tmp_db_path):
+    """Old databases predate the column; _init_db must add it in place."""
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.execute(
+            "CREATE TABLE episodes ("
+            "id TEXT PRIMARY KEY, content TEXT NOT NULL, salience REAL, "
+            "timestamp DATETIME, metadata JSON)"
+        )
+        conn.commit()
+
+    db = Database(tmp_db_path)
+    ep_id = db.add_episode("legacy row")
+
+    assert db.get_unconsolidated_episodes(10) == [{"id": ep_id, "content": "legacy row"}]
+    assert db.mark_consolidated([ep_id]) == 1
+    assert db.get_unconsolidated_episodes(10) == []

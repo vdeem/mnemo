@@ -53,11 +53,14 @@ class Mnemo:
         return False
 
     def consolidate(self, limit=50):
-        """Run “Sieve” (call once an hour or on exit)."""
-        episodes = self.db.get_recent_episodes(limit)
+        """Run “Sieve” over episodes it has not seen yet (call hourly or on exit)."""
+        episodes = self.db.get_unconsolidated_episodes(limit)
         if not episodes:
             return 0
-        return self.consolidator.consolidate(episodes, self.db)
+        processed = self.consolidator.consolidate(episodes, self.db)
+        if processed:
+            self.db.mark_consolidated([ep["id"] for ep in episodes[:processed]])
+        return processed
 
     def decay(self, decay_rate: float = 0.1, threshold: float = 0.05):
         """

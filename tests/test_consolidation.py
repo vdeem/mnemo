@@ -37,11 +37,27 @@ def test_decay_archives_dead_edges(mnemo, tmp_db_path):
         assert conn.execute("SELECT COUNT(*) FROM edges_archive").fetchone()[0] > 0
 
 
-# TODO(next iteration): enable once consolidated_at is implemented.
-# Re-running consolidate() currently re-processes every episode and keeps
-# incrementing edge weights, so this test is expected to fail today.
-#
-# def test_consolidate_is_idempotent(mnemo):
-#     mnemo.add("Alice is a dog.")
-#     mnemo.consolidate()
-#     assert mnemo.consolidate() == 0
+def _total_edge_weight(db_path):
+    with sqlite3.connect(db_path) as conn:
+        return conn.execute("SELECT COALESCE(SUM(weight), 0) FROM edges").fetchone()[0]
+
+
+def test_consolidate_is_idempotent(mnemo, tmp_db_path):
+    """A second run must process nothing and must not inflate edge weights."""
+    mnemo.add("Alice is a dog.")
+    assert mnemo.consolidate() == 1
+
+    weight_after_first_run = _total_edge_weight(tmp_db_path)
+    assert weight_after_first_run > 0
+
+    assert mnemo.consolidate() == 0
+    assert _total_edge_weight(tmp_db_path) == weight_after_first_run
+
+
+def test_consolidate_marks_episodes(mnemo):
+    mnemo.add("Bob likes tea.")
+    assert mnemo.db.get_unconsolidated_episodes(10)
+
+    mnemo.consolidate()
+
+    assert mnemo.db.get_unconsolidated_episodes(10) == []

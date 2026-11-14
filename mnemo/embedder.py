@@ -124,5 +124,4 @@ class Embedder:
                 documents=[e["content"] for e in batch],
             )
             added += len(batch)
-        print(f"[mnemo] reindexed {added} episodes with {self.model_name}")
         return added

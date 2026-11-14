@@ -1,5 +1,7 @@
 """Recall behaviour tests."""
 
+from mnemo.core import Mnemo
+
 
 def test_recall_empty_db(mnemo):
     assert mnemo.recall("anything") == {"episodes": [], "facts": []}
@@ -26,3 +28,20 @@ def test_add_same_episode_twice_does_not_raise(mnemo):
     mnemo.embedder.add(ids=[ep_id], documents=["The user likes coffee."])
 
     assert [ep["id"] for ep in mnemo.recall("coffee")["episodes"]] == [ep_id]
+
+
+def test_ensure_ids_reindexes_missing(tmp_db_path, tmp_chroma_path):
+    """A vector lost from the index is rebuilt from SQLite on the next startup."""
+    first = Mnemo(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
+    try:
+        ep_id = first.add("The user likes coffee.")
+        first.embedder.delete([ep_id])
+        assert first.recall("coffee")["episodes"] == []
+    finally:
+        first.close()
+
+    second = Mnemo(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
+    try:
+        assert [ep["id"] for ep in second.recall("coffee")["episodes"]] == [ep_id]
+    finally:
+        second.close()

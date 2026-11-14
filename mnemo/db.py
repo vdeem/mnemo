@@ -13,6 +13,10 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, declaratio
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
 
+# How long an unreferenced node survives before delete_episodes() prunes it.
+ORPHAN_NODE_GRACE_DAYS = 7
+
+
 def parse_utc(value) -> datetime:
     """Parse a SQLite timestamp, treating naive values as UTC.
 
@@ -332,8 +336,15 @@ class Database:
                 for row in cursor.fetchall()
             }
 
-    def delete_episodes(self, ids: list) -> int:
-        """Remove episodes by id; the vector index is cleaned separately."""
+    def delete_episodes(self, ids: list, orphan_grace_days: int = ORPHAN_NODE_GRACE_DAYS) -> int:
+        """Remove episodes by id; the vector index is cleaned separately.
+
+        Consolidation creates nodes that no episode row owns, so deleting
+        episodes can leave the graph holding concepts nothing points at any
+        more. Nodes are only dropped when they have no edge at all *and* have
+        been untouched for ``orphan_grace_days``: a node with edges may still be
+        shared with another episode.
+        """
         if not ids:
             return 0
         placeholders = ','.join('?' * len(ids))
@@ -341,7 +352,21 @@ class Database:
             cursor = conn.execute(
                 f"DELETE FROM episodes WHERE id IN ({placeholders})", ids
             )
-            return cursor.rowcount
+            deleted = cursor.rowcount
+            if deleted:
+                self._delete_orphan_nodes(conn, orphan_grace_days)
+            return deleted
+
+    @staticmethod
+    def _delete_orphan_nodes(conn: sqlite3.Connection, grace_days: int) -> int:
+        cursor = conn.execute(
+            "DELETE FROM nodes WHERE NOT EXISTS ("
+            "    SELECT 1 FROM edges"
+            "    WHERE edges.source_id = nodes.id OR edges.target_id = nodes.id"
+            ") AND last_seen < datetime('now', ?)",
+            (f"-{int(grace_days)} days",),
+        )
+        return cursor.rowcount
 
     def all_episodes(self) -> list:
         """Every episode as {id, content}; used to rebuild the vector index."""

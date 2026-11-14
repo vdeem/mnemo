@@ -1,7 +1,7 @@
 """Database-level unit tests."""
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from mnemo.db import Database, parse_utc
 
@@ -46,6 +46,30 @@ def test_delete_episodes(db):
     ep_id = db.add_episode("temp")
     assert db.delete_episodes([ep_id]) == 1
     assert db.episode_id_for("temp") is None
+
+
+def test_delete_episodes_does_not_orphan_nodes(db, tmp_db_path):
+    ep_id = db.add_episode("Alice knows Bob.")
+    alice = db.get_or_create_node("alice")
+    bob = db.get_or_create_node("bob")
+    db.reinforce_edge(alice, bob, relation="knows")
+    db.get_or_create_node("stale")
+
+    # Age everything past the grace window, then create a fresh edge-less node.
+    old = (datetime.now(timezone.utc) - timedelta(days=30)).replace(tzinfo=None)
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.execute("UPDATE nodes SET last_seen = ?", (old.isoformat(),))
+        conn.commit()
+    db.get_or_create_node("fresh")
+
+    assert db.delete_episodes([ep_id]) == 1
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        remaining = {row[0] for row in conn.execute("SELECT name FROM nodes")}
+
+    # Connected nodes survive even though they are stale; the stale orphan is
+    # pruned; the recent orphan is still inside the grace window.
+    assert remaining == {"alice", "bob", "fresh"}
 
 
 def test_parse_utc_treats_naive_timestamps_as_utc():

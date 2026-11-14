@@ -18,7 +18,11 @@ class Mnemo:
         self._last_duplicate_id: str | None = None
         # SQLite is the source of truth; Chroma is only a search index.
         # Backfills vectors after a model switch instead of losing old episodes.
-        self.embedder.ensure_ids(self.db.all_episodes())
+        reindexed = self.embedder.ensure_ids(self.db.all_episodes())
+        if reindexed:
+            log.info(
+                "reindexed %d episodes with %s", reindexed, self.embedder.model_name
+            )
 
     def add(self, text: str, metadata: dict = None, salience: float = 0.5,
             dedupe: bool = True):
@@ -161,8 +165,18 @@ class Mnemo:
         return deleted
 
     def close(self):
-        """Release Chroma handles (Windows keeps files locked otherwise)."""
+        """Release Chroma handles (Windows keeps files locked otherwise).
+
+        ``Client.close()`` is refcounted: the underlying system is only stopped
+        and evicted once no client uses that path, so a later ``Mnemo`` on the
+        same path starts a fresh system instead of reusing a stopped one.
+        """
+        client = self.embedder.client
         try:
-            self.embedder.client._system.stop()
+            close = getattr(client, "close", None)
+            if close is not None:
+                close()
+            else:  # chromadb < 1.5 has no refcounted close()
+                client._system.stop()
         except Exception:
-            pass
+            log.debug("failed to close the Chroma client", exc_info=True)

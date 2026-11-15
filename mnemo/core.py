@@ -40,6 +40,15 @@ PRESETS: dict[str, RecallWeights] = {
 
 RECALL_PRESET_ENV = "MNEMO_RECALL_PRESET"
 
+# Chroma returns squared L2 distance for normalized e5 vectors, so this equals
+# cosine similarity >= 0.75. Weak matches are noise; callers can widen it with
+# MNEMO_MAX_DISTANCE or the max_distance argument.
+DEFAULT_MAX_DISTANCE = 0.5
+
+# A query can mention several entities and every graph lookup returns its own
+# neighbourhood; cap the merged list so one recall does not flood the context.
+MAX_RECALL_FACTS = 20
+
 
 def _weights_from_env() -> RecallWeights | None:
     """Resolve ``MNEMO_RECALL_PRESET``; unknown names fail fast and loud."""
@@ -179,7 +188,9 @@ class Mnemo:
         normal, honest answer instead of noise.
         """
         if max_distance is None:
-            max_distance = float(os.getenv("MNEMO_MAX_DISTANCE", "1.0"))
+            max_distance = float(
+                os.getenv("MNEMO_MAX_DISTANCE", str(DEFAULT_MAX_DISTANCE))
+            )
 
         raw_episodes = self.embedder.search(query, k=max(k * 3, k))
         if not raw_episodes:
@@ -239,11 +250,30 @@ class Mnemo:
         scored_episodes.sort(key=lambda e: e["score"], reverse=True)
         top_episodes = scored_episodes[:k]
 
-        # Graph search (spreading activation) over entities in the query.
+        # Graph search (spreading activation) over entities in the query. The
+        # same edge is returned for each endpoint (and co_occurs is the noisy
+        # implicit mesh, not a fact), so merge by (source, relation, target)
+        # and keep the strongest copy.
         query_entities = self.consolidator.extract_entities(query)
-        graph_facts = []
-        for ent in query_entities:
-            graph_facts.extend(self.db.get_graph_context(ent))
+        facts_by_key: dict[tuple[str, str, str], dict] = {}
+        for entity in query_entities:
+            for fact in self.db.get_graph_context(entity):
+                if fact["relation"] == "co_occurs":
+                    continue
+                key = (fact["source"], fact["relation"], fact["target"])
+                previous = facts_by_key.get(key)
+                if previous is None or fact["weight"] > previous["weight"]:
+                    facts_by_key[key] = fact
+
+        graph_facts = sorted(
+            facts_by_key.values(),
+            key=lambda fact: (
+                -float(fact["weight"] or 0.0),
+                fact["source"],
+                fact["relation"],
+                fact["target"],
+            ),
+        )[:MAX_RECALL_FACTS]
 
         return {
             "episodes": top_episodes,

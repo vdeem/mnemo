@@ -2,7 +2,13 @@
 
 import pytest
 
-from mnemo.core import PRESETS, Mnemo, RecallWeights
+from mnemo.core import (
+    DEFAULT_MAX_DISTANCE,
+    MAX_RECALL_FACTS,
+    PRESETS,
+    Mnemo,
+    RecallWeights,
+)
 
 
 def test_recall_empty_db(mnemo):
@@ -182,3 +188,63 @@ def test_exact_duplicate_heals_missing_vector(mnemo):
 
     assert mnemo.add("The vault code is 1234.") == ep_id
     assert mnemo.embedder.collection.count() == 1
+
+
+def test_recall_default_max_distance_filters_weak_matches(monkeypatch, mnemo):
+    close = mnemo.add("A close memory.")
+    far = mnemo.add("A far memory.", dedupe=False)
+
+    def fake_search(query: str, k: int = 5):
+        return [
+            {
+                "id": close,
+                "text": "A close memory.",
+                "distance": DEFAULT_MAX_DISTANCE - 0.01,
+            },
+            {
+                "id": far,
+                "text": "A far memory.",
+                "distance": DEFAULT_MAX_DISTANCE + 0.01,
+            },
+        ]
+
+    monkeypatch.setattr(mnemo.embedder, "search", fake_search)
+
+    assert [ep["id"] for ep in mnemo.recall("memory")["episodes"]] == [close]
+
+
+def test_recall_facts_exclude_cooccurrence(mnemo):
+    mnemo.add("Alice met Bob.")
+    mnemo.consolidate()
+
+    facts = mnemo.recall("Alice")["facts"]
+
+    assert facts
+    assert all(fact["relation"] != "co_occurs" for fact in facts)
+
+
+def test_recall_facts_are_deduplicated(mnemo):
+    mnemo.add("Alice knows Bob.")
+    mnemo.consolidate()
+
+    facts = mnemo.recall("Alice knows Bob.")["facts"]
+
+    keys = [(fact["source"], fact["relation"], fact["target"]) for fact in facts]
+    assert ("alice", "know", "bob") in keys
+    assert len(keys) == len(set(keys))
+
+
+def test_recall_facts_are_capped(mnemo):
+    alice = mnemo.db.get_or_create_node("alice")
+    bob = mnemo.db.get_or_create_node("bob")
+    for index in range(MAX_RECALL_FACTS + 5):
+        target = mnemo.db.get_or_create_node(f"concept {index}")
+        mnemo.db.reinforce_edge(alice, target, relation="knows")
+        mnemo.db.reinforce_edge(bob, target, relation="knows")
+
+    mnemo.add("Alice and Bob are here.")
+    mnemo.consolidate()
+
+    facts = mnemo.recall("Alice and Bob are here.")["facts"]
+
+    assert 0 < len(facts) <= MAX_RECALL_FACTS

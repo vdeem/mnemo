@@ -150,4 +150,39 @@ the crashed episode is fully rolled back, and unprocessed episodes keep their
 `consolidated_at IS NULL`. The consolidator now owns the marking invariant;
 custom consolidators must mark their episodes the same way.
 
+## ADR-010 — recall precision defaults and fact projection
+
+**Decision:** `max_distance` defaults to `DEFAULT_MAX_DISTANCE = 0.5`
+(squared-L2, i.e. cosine >= 0.75 on normalized e5 vectors). `recall()` returns
+only typed facts: `co_occurs` is excluded, duplicates are merged by
+`(source, relation, target)`, and the list is sorted by weight and capped at
+`MAX_RECALL_FACTS` (20).
+
+**Why:** with the previous default of 1.0 even unrelated queries returned the
+whole store, so "nothing relevant" was not a possible answer. Graph lookups for
+each query entity also returned the same edge multiple times plus the implicit
+`co_occurs` mesh, with no size bound — a direct context-bloat risk for agents.
+
+**Consequences:** precision is favoured over recall; callers that need wider
+matches pass `max_distance=` or set `MNEMO_MAX_DISTANCE`. The constant is
+model-specific (distance is squared L2), so switching embedding models requires
+recalibration. `k` still controls episodes only; facts have their own cap.
+
+## ADR-011 — dedupe semantics
+
+**Decision:** `add(..., dedupe=True)` merges exact and near duplicates: the
+existing episode gets a salience floor, merged metadata and a fresh timestamp.
+`dedupe=False` inserts a separate row even for identical text. Salience is
+clamped to 0..1 on every add.
+
+**Why:** `dedupe=False` used to return the existing id anyway, so the flag was
+a lie; repeat adds silently discarded new metadata and ignored an explicit
+higher salience, which made "this memory matters more now" impossible to
+express.
+
+**Consequences:** duplicate content is allowed when the caller asks for it,
+and `episode_id_for()` returns the first match. A near-duplicate text is still
+not stored (only its metadata/salience are merged); that remains a deliberate
+trade-off, documented in `docs/extraction.md`.
+
 

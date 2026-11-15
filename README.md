@@ -14,10 +14,10 @@ Mnemo takes a different approach: **cognitive consolidation**. It uses local NLP
 
 ## Features
 
-- **Zero-LLM Extraction** — spaCy NER plus dependency-based triple extraction and lemmatization build the graph. No clustering, no second encoder, no OpenAI call, ever.
+- **Zero-LLM Extraction** — spaCy NER plus dependency-based triples with lemmatized endpoints and negation-aware predicates (`not_like`, `is_not_a`) build the graph. No clustering, no second encoder, no OpenAI call, ever.
 - **Multilingual by default** — Vectors come from `intfloat/multilingual-e5-small` (override with `MNEMO_EMBED_MODEL`), so a Chinese query can recall an English memory. Extraction itself stays English-only via `en_core_web_sm`.
 - **Hybrid Retrieval** — Combines vector similarity (episodic memory) with graph traversal (semantic memory).
-- **Honest retrieval** — A `max_distance` threshold cuts weak matches, so "nothing relevant" is a valid answer instead of noise.
+- **Honest retrieval** — A `max_distance` threshold (0.5 by default, cosine >= 0.75) cuts weak matches, so "nothing relevant" is a valid answer instead of noise; typed facts are deduplicated and capped.
 - **Local-First** — SQLite and ChromaDB on your disk.
 - **Lightweight** — Runs on consumer hardware, no GPU required.
 - **Forgetting (Decay)** — Old, unreinforced connections fade away and are archived, preventing database bloat and keeping only the most relevant memories.
@@ -77,9 +77,10 @@ mnemo.delete([episode_id])
 - [x] Multilingual embeddings (`intfloat/multilingual-e5-small`)
 - [~] Multi-language support — partial: retrieval is multilingual, spaCy extraction is still English-only
 - [x] Phase 2 — Agent context brief
+- [x] Reliability hardening and negation-aware extraction
 - [ ] Phase 2b — RAG adapters
 
-See [docs/status.md](docs/status.md) for the current status, recent changes and the detailed roadmap.
+See [docs/status.md](docs/status.md) for the current status, recent changes and the detailed roadmap, and [docs/extraction.md](docs/extraction.md) for the extraction rules.
 
 ## License
 

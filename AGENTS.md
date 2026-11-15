@@ -58,13 +58,15 @@ Enforce these invariants. If existing code violates one, fix it as part of your 
 - **SQLite hygiene.** Every connection: `PRAGMA journal_mode=WAL`, `PRAGMA busy_timeout=5000`, `PRAGMA foreign_keys=ON` (see `db._configure`). Use `Database.batch()` for multi-row writes (consolidation opens one connection per episode, not per row).
 - **Schema changes** go through `Database._init_db` using idempotent `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN` (helper: `db._ensure_column`). Never write migrations that drop or rewrite existing user data.
 - **Current schema:** `episodes(id, content, salience, timestamp, metadata, consolidated_at)`, `nodes(id, name UNIQUE, node_type, last_seen, display_name)`, `edges(id, source_id, target_id, relation, weight, last_reinforced)`, `episode_edges(episode_id, edge_id, hits)` plus `edges_archive` created by `decay`.
-- **Extraction contract.** `extract_entities` / `extract_triples` return normalized lowercase strings. Entity names are lemmas (`dog`, not `dogs`) and the original casing is stored as `nodes.display_name`; `node_type` comes from the spaCy label (`PERSON`, `ORG`, `GPE`, `PRODUCT`, `EVENT`, else `entity`). Pronouns and `GENERIC_NOUNS` are filtered — a concept node must be specific enough to be worth linking.
+- **Extraction contract.** `extract_entities` / `extract_triples` return normalized lowercase strings. Entity names are lemmas (`dog`, not `dogs`), a trailing sentence period is stripped from the graph key, and the original text is stored as `nodes.display_name`; `node_type` comes from the spaCy label (`PERSON`, `ORG`, `GPE`, `PRODUCT`, `EVENT`, else `entity`). NER spans win over noun chunks contained in them. Triple endpoints use lemmas too. Negated predicates are prefixed `not_` (copulas use `is_not_a`) instead of being inverted or dropped; coordinated verbs inherit their head's subject; a `ccomp`/`xcomp` clause is processed instead of its intransitive head. Pronouns and `GENERIC_NOUNS` are filtered — a concept node must be specific enough to be worth linking. Rules and failure modes: `docs/extraction.md`.
 - **Co-occurrence is bounded.** Co-occurrence edges are per sentence and capped at `MAX_COOCCURRENCE_PAIRS` (10). Typed triples are the high-confidence layer; do not turn the graph back into an all-pairs mesh.
 - **No `print()` in library code.** Use `logging.getLogger(__name__)`. `print` is allowed only in `server.py` startup paths and CLI entrypoints.
 - **Chroma lifecycle.** `Mnemo.close()` must call Chroma's refcounted `client.close()`. Calling `client._system.stop()` directly leaves a stopped system cached for that path, and reopening the same store in-process then fails with "Could not connect to tenant".
 - **SQLite is authoritative for vectors.** `Mnemo.__init__` calls `Embedder.reconcile()` (add missing, prune orphans) and `recall()` skips ids without an episode row. Never trust a Chroma id alone.
 - **MCP tools are thin wrappers.** `server.py` tools parse args, call `Mnemo`, serialize the result. No NLP, no SQL, no business rules there.
 - **Configurable recall weights.** The salience/valence/recency multipliers used by `recall()` live in `RecallWeights` (`mnemo/core.py`, exported from the `mnemo` package) with named `PRESETS` (`balanced`, `emotional`). Never reintroduce hardcoded numbers there. Resolution order: explicit `Mnemo(weights=...)` → `MNEMO_RECALL_PRESET` env var (unknown names raise `ValueError`) → `balanced`. Semantic similarity keeps its unit weight; `recency_halflife_days` feeds the existing `exp(-age_days / value)` decay (45.0 preserves the Phase 0 scores).
+- **Recall facts and distance.** `recall()["facts"]` is a typed projection: `co_occurs` edges are excluded, duplicates are merged by `(source, relation, target)`, and the list is sorted by weight and capped at `MAX_RECALL_FACTS` (20). `max_distance` defaults to `DEFAULT_MAX_DISTANCE` (0.5, i.e. cosine >= 0.75 on normalized e5 vectors) and is overridable per call or by `MNEMO_MAX_DISTANCE`.
+- **Dedupe semantics.** `add(..., dedupe=True)` merges exact and near duplicates: metadata is merged and salience is raised to the requested floor (clamped to 0..1). `dedupe=False` inserts a separate row even for identical text. Near-duplicate text itself is still dropped by design; only its metadata/salience are kept.
 - **Public API stability.** Keep `Mnemo.add / recall / consolidate / decay / delete` signatures backward-compatible within `0.x`. Optional kwargs are fine; renames need a deprecation path.
 - **Typing.** All public functions annotated. No `Any` without a docstring justification.
 
@@ -99,10 +101,10 @@ session start. It is a projection of SQLite, never a second source of truth.
 
 - Every new function in `consolidator.py` and `db.py` gets a pytest case in `tests/`.
 - Test files and what they own:
-  - `tests/test_extraction.py` — pure spaCy rules: triples, lemmatization, pronoun/generic filtering, display names and node types.
+  - `tests/test_extraction.py` — pure spaCy rules: triples, lemmatized endpoints, negation prefixes, subject inheritance for coordinated verbs, clausal complements, pronoun/generic filtering, nested NER spans, display names and node types.
   - `tests/test_db.py` — schema + idempotent migrations, episode/node/edge CRUD, UTC parsing, orphan cleanup, edge provenance and shared-edge deletion, decay cascade, NULL metadata.
   - `tests/test_consolidation.py` — end-to-end `Mnemo.consolidate()`: counts, graph build, idempotency, decay/archiving, co-occurrence bounds, delete-forgets-facts, crash resumability.
-  - `tests/test_recall.py` — similarity-driven recall, `max_distance`, `RecallWeights` presets/env precedence, duplicate add/upsert, startup reindex, orphan-vector pruning and re-add durability.
+  - `tests/test_recall.py` — similarity-driven recall, `max_distance` default and override, `RecallWeights` presets/env precedence, duplicate add/upsert, `dedupe=False`, metadata/salience merge, startup reindex, orphan-vector pruning, fact deduplication/capping.
   - `tests/test_brief.py` — Markdown brief rendering: empty graph, typed triples only, deterministic bytes, write-on-consolidate and skip-on-no-op.
 - `test_mcp_client.py` at the repo root is an **end-to-end MCP smoke test**, not a unit test. Run it manually before releases; do not add it to `tests/`.
 - `test_new.py` and `test_mnemo.py` were removed; their scenarios now live in `tests/` above. Do not recreate them at the repo root.
@@ -112,6 +114,9 @@ session start. It is a projection of SQLite, never a second source of truth.
   - A mid-pass consolidation crash resumes without doubling weights (`test_partial_consolidation_is_resumable`).
   - Orphan vectors are never served, pruned at startup, and re-adding the text inserts a row (`tests/test_recall.py`).
   - Deleting an episode drops edges only it supported and keeps shared edges (`tests/test_db.py`).
+  - Negated claims are stored with a `not_` predicate, and triple endpoints are lemmatized (`tests/test_extraction.py`).
+  - `recall()["facts"]` excludes `co_occurs`, deduplicates and respects `MAX_RECALL_FACTS`.
+  - `dedupe=False` inserts a duplicate; a repeat `add()` merges metadata and raises salience.
   - Duplicate `add()` of the same text does not raise and does not duplicate the episode.
   - `decay` reduces weights and archives edges below threshold.
   - `recall` returns non-empty for an exact-match query and honours `max_distance`.
@@ -124,7 +129,7 @@ session start. It is a projection of SQLite, never a second source of truth.
 Read on demand, not upfront:
 - `docs/status.md` — current status, what changed, known limitations, roadmap.
 - `docs/decisions.md` — ADRs (why SQLite, why zero-LLM, why Chroma, why multilingual-e5-small, vector reconciliation, edge provenance, transactional marking).
-- `docs/extraction.md` — entity/triple extraction rules, stop-list (`GENERIC_NOUNS`), known spaCy failure modes. Note that triple endpoints still use raw token text, so a plural triple head can differ from its lemmatized entity node. *(Create this file if it does not exist yet.)*
+- `docs/extraction.md` — entity/triple extraction rules, stop-list (`GENERIC_NOUNS`), negation conventions, and known spaCy failure modes.
 - `docs/skill.md` — SKILL.md packaging contract for Agensi / MCP marketplaces. *(Planned for Phase 3; create a stub when packaging begins.)*
 
 ## When you finish a task

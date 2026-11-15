@@ -59,11 +59,42 @@ on an unmarked episode, and the retry doubled the weights. Each episode is now
 marked inside its own batch, so a crash rolls the episode's writes and its mark
 back together; the next pass resumes exactly where it stopped.
 
+### 5. Extraction quality (`897ce0c`, `bc3eb20`)
+
+Triple endpoints are lemmatized, so "The dogs chase the cats." yields
+dog/chase/cat and collapses onto the entity nodes. Negation is represented
+instead of inverted (`not_like`, `not_work`, `is_not_a`, and `not_sleep` in the
+intransitive phrase). Coordinated verbs inherit the subject of their head, and
+a clausal complement is processed as the fact ("I think Bob likes tea" ->
+bob/like/tea). Noun chunks inside an NER span are skipped, noun chunks keep
+their casing as `display_name`, and a trailing period is stripped from the
+graph key ("Acme Corp." and "Acme Corp" collapse). Full rules and known spaCy
+failure modes live in [extraction.md](extraction.md).
+
+### 6. Recall quality (`1ba35cd`)
+
+`facts` excludes `co_occurs`, merges duplicates by
+`(source, relation, target)`, keeps the strongest copy, sorts by weight and is
+capped at `MAX_RECALL_FACTS` (20). The default `max_distance` dropped from 1.0
+to 0.5 (cosine >= 0.75); widen it per call or with `MNEMO_MAX_DISTANCE`.
+
+### 7. Dedupe semantics (`db5423d`)
+
+`dedupe=False` now really inserts a duplicate instead of returning the existing
+row. Repeats merge metadata and raise salience to the requested floor; salience
+is clamped to 0..1 on the way in.
+
 ## Current state
 
-- Tests: **59 passed** (`pytest -q`), including new coverage for orphan-vector
+- Tests: **76 passed** (`pytest -q`), including new coverage for orphan-vector
   pruning, re-add durability, shared-edge deletion, provenance cascade on decay,
-  and a simulated mid-pass consolidation crash.
+  a simulated mid-pass consolidation crash, negation, lemmatized endpoints,
+  coordinated verbs, nested entities, fact deduplication/capping and dedupe
+  semantics.
+- Defaults: `max_distance=0.5`, `MAX_RECALL_FACTS=20`, negation-aware
+  predicates, lemmatized triple endpoints.
+- `add(..., dedupe=False)` stores duplicates; `dedupe=True` merges metadata and
+  raises salience to the requested floor.
 - Schema: `episodes`, `nodes`, `edges`, `edges_archive`, `episode_edges`.
 - Public API unchanged; schema additions are idempotent and additive.
 - Existing databases keep working. Facts extracted before `episode_edges`
@@ -82,19 +113,15 @@ On Windows, if `%TEMP%` is not writable the test suite falls back to
 
 ## Roadmap
 
-### P1 — extraction and retrieval quality
+### P1 — remaining extraction quality
 
-- Negation is ignored: `"Alice doesn't like tea."` yields
-  `("alice", "like", "tea")`, i.e. the opposite fact.
-- Triple endpoints use raw token text (`dogs`/`cats`) while entity nodes are
-  lemmas (`dog`/`cat`), which fragments the graph.
-- Only the ROOT verb is processed: coordination (`sings and dances`), `ccomp`
-  (`I think Bob likes tea`) and compound names (`New York` -> `york`) are lost.
-- Nested NER spans and trailing punctuation create duplicate nodes
-  (`acme corp.` vs `acme corp`, `Acme Corp` + `Corp`).
-- `dedupe=True` silently drops near-duplicate texts without merging metadata.
-- `max_distance` defaults to `1.0` (cos >= 0.5 on e5), so weak matches pass.
-- `recall()["facts"]` includes `co_occurs`, is not deduplicated and has no cap.
+- spaCy sometimes tags coordinated verbs as nouns ("Alice sings and dances."),
+  so the coordination logic cannot fire. This is a tagger ambiguity, not a
+  graph bug.
+- Triple endpoints are token-level, so a multiword subject loses modifiers
+  ("New York" -> "york" in a triple) and coreference is not resolved.
+- Negation only reads the `neg` dependency; `no` (determiner) and `never`
+  (adverb) are not marked.
 
 ### P2 — operations and hardening
 
@@ -102,7 +129,7 @@ On Windows, if `%TEMP%` is not writable the test suite falls back to
   that closes Chroma. Expose `delete_memory`/`decay_memory`; raise `ToolError`
   instead of returning `"Error: ..."` strings.
 - Add an index on `episodes.content` (every `add()` currently scans).
-- Freeze `RecallWeights` presets; validate `salience`; reject empty text.
+- Freeze `RecallWeights` presets; reject empty text.
 - Chunk or warn for episodes longer than the encoder's 512-token limit.
 - Canonical ordering for `co_occurs` (it is currently directed by mention
   order, so reversed mentions create a second edge).
@@ -111,5 +138,5 @@ On Windows, if `%TEMP%` is not writable the test suite falls back to
 
 ### P3 — packaging and docs
 
-- `docs/extraction.md` and `docs/skill.md` are still missing.
+- `docs/skill.md` is still missing.
 - Console entry point and a `dev` extras group.

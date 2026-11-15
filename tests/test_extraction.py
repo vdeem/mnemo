@@ -107,5 +107,13 @@ def test_entity_mentions_keep_display_name_and_type(consolidator):
 
     assert mentions["jack"]["display_name"] == "Jack"
     assert mentions["jack"]["node_type"] == "PERSON"
-    assert mentions["acme corp."]["node_type"] == "ORG"
-    assert mentions["acme corp."]["display_name"] == "Acme Corp."
+    assert mentions["acme corp"]["node_type"] == "ORG"
+    assert mentions["acme corp"]["display_name"] == "Acme Corp."
+
+
+def test_entity_trailing_period_does_not_fork_the_node(consolidator):
+    with_period = set(consolidator.extract_entities("I work at Acme Corp."))
+    without_period = set(consolidator.extract_entities("Acme Corp is hiring."))
+
+    assert with_period == without_period
+    assert "acme corp" in with_period

@@ -74,7 +74,10 @@ class Consolidator:
 
         def remember(raw: str, node_type: str, name: str | None = None) -> None:
             display = _strip_possessive(raw)
-            key = (name or display).lower()
+            # NER often swallows the sentence-final period ("Acme Corp.").
+            # The display keeps it, but the graph key must match the version
+            # without it ("Acme Corp is hiring").
+            key = (name or display).lower().strip().rstrip(".").strip()
             if not key or key in GENERIC_NOUNS:
                 return
             if key not in mentions:

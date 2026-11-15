@@ -234,6 +234,35 @@ def test_recall_facts_are_deduplicated(mnemo):
     assert len(keys) == len(set(keys))
 
 
+def test_add_dedupe_false_allows_identical_content(mnemo):
+    first = mnemo.add("The vault code is 1234.", dedupe=False)
+    second = mnemo.add("The vault code is 1234.", dedupe=False)
+
+    assert first != second
+    assert len(mnemo.recall("The vault code is 1234.", k=5)["episodes"]) == 2
+
+
+def test_repeat_add_merges_metadata_and_salience(mnemo):
+    ep_id = mnemo.add("The user likes green tea.", metadata={"source": "chat"})
+
+    again = mnemo.add(
+        "The user likes green tea.",
+        metadata={"valence": 0.9},
+        salience=0.9,
+    )
+
+    assert again == ep_id
+    details = mnemo.db.get_episode_details([ep_id])[ep_id]
+    assert details["metadata"] == {"source": "chat", "valence": 0.9}
+    assert details["salience"] == 0.9
+
+
+def test_salience_is_clamped(mnemo):
+    ep_id = mnemo.add("A very vivid memory.", salience=7.5)
+
+    assert mnemo.db.get_episode_details([ep_id])[ep_id]["salience"] == 1.0
+
+
 def test_recall_facts_are_capped(mnemo):
     alice = mnemo.db.get_or_create_node("alice")
     bob = mnemo.db.get_or_create_node("bob")

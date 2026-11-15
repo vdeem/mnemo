@@ -89,12 +89,16 @@ class Mnemo:
             dedupe: bool = True):
         """Add an episode. Salience (0-1) marks how emotionally vivid it is.
 
-        Near-duplicates are merged: the existing episode gets a salience bump
-        and a fresh timestamp instead of a second copy of the same fact.
+        Repeats are merged: the existing episode gets a salience bump/floor,
+        its metadata is merged and its timestamp is refreshed. Pass
+        ``dedupe=False`` to store identical text as a separate episode.
         """
-        existing = self.db.episode_id_for(text)
+        salience = max(0.0, min(1.0, float(salience)))
+
+        existing = self.db.episode_id_for(text) if dedupe else None
         if existing:
-            self.db.reinforce_episode(existing)
+            self.db.reinforce_episode(existing, salience_floor=salience)
+            self.db.merge_episode_metadata(existing, metadata)
             # A crash between the SQLite insert and the vector upsert leaves the
             # episode invisible to recall; heal it on the next duplicate add.
             if not self.embedder.contains(existing):
@@ -102,15 +106,20 @@ class Mnemo:
             return existing
 
         if dedupe:
-            duplicate = self._near_duplicate_id(text)
+            duplicate = self._near_duplicate_id(
+                text, salience=salience, metadata=metadata
+            )
             if duplicate:
                 return duplicate
 
-        ep_id = self.db.add_episode(text, metadata, salience=salience)
+        ep_id = self.db.add_episode(
+            text, metadata, salience=salience, dedupe=dedupe
+        )
         self.embedder.add(ids=[ep_id], documents=[text])
         return ep_id
 
-    def _near_duplicate_id(self, text: str) -> str | None:
+    def _near_duplicate_id(self, text: str, salience: float = 0.5,
+                           metadata: dict | None = None) -> str | None:
         """Return the id of an existing near-duplicate episode, if any.
 
         Only rows that still exist in SQLite count: a vector whose episode was
@@ -131,7 +140,8 @@ class Mnemo:
         if not self.db.episode_exists(best["id"]):
             self.embedder.delete([best["id"]])
             return None
-        self.db.reinforce_episode(best["id"])
+        self.db.reinforce_episode(best["id"], salience_floor=salience)
+        self.db.merge_episode_metadata(best["id"], metadata)
         return best["id"]
 
     def consolidate(self, limit=50, write_brief: bool = True,

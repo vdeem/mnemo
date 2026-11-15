@@ -186,13 +186,22 @@ class Database:
             _ensure_column(conn, "episodes", "consolidated_at", "DATETIME")
             _ensure_column(conn, "nodes", "display_name", "TEXT")
 
-    def add_episode(self, content: str, metadata: dict = None, salience: float = 0.5) -> str:
+    def add_episode(self, content: str, metadata: dict = None, salience: float = 0.5,
+                    dedupe: bool = True) -> str:
+        """Insert an episode and return its id.
+
+        With ``dedupe=True`` an identical text returns the existing id; with
+        ``dedupe=False`` the text is stored again under a new id.
+        """
         with self._conn() as conn:
-            cursor = conn.execute("SELECT id FROM episodes WHERE content = ?", (content,))
-            row = cursor.fetchone()
-            if row:
-                return row[0]
-            
+            if dedupe:
+                cursor = conn.execute(
+                    "SELECT id FROM episodes WHERE content = ?", (content,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    return row[0]
+
             ep_id = str(uuid.uuid4())
             conn.execute(
                 "INSERT INTO episodes (id, content, salience, metadata) VALUES (?, ?, ?, ?)",
@@ -216,15 +225,46 @@ class Database:
             ).fetchone()
             return row is not None
 
-    def reinforce_episode(self, ep_id: str, salience_step: float = 0.05) -> bool:
-        """The fact was repeated: bump salience and refresh recency."""
+    def reinforce_episode(self, ep_id: str, salience_step: float = 0.05,
+                          salience_floor: float | None = None) -> bool:
+        """The fact was repeated: bump salience and refresh recency.
+
+        ``salience_floor`` raises the stored value to at least that level, so
+        re-adding a memory with ``salience=0.9`` actually promotes it instead
+        of only adding the default step.
+        """
         with self._conn() as conn:
+            if salience_floor is None:
+                cursor = conn.execute(
+                    "UPDATE episodes SET salience = MIN(1.0, salience + ?), "
+                    "timestamp = CURRENT_TIMESTAMP WHERE id = ?",
+                    (salience_step, ep_id),
+                )
+            else:
+                cursor = conn.execute(
+                    "UPDATE episodes SET salience = MIN(1.0, MAX(salience + ?, ?)), "
+                    "timestamp = CURRENT_TIMESTAMP WHERE id = ?",
+                    (salience_step, float(salience_floor), ep_id),
+                )
+            return cursor.rowcount > 0
+
+    def merge_episode_metadata(self, ep_id: str, metadata: dict | None) -> bool:
+        """Merge new metadata into an existing episode; new keys win."""
+        if not metadata:
+            return False
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT metadata FROM episodes WHERE id = ?", (ep_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            merged = _decode_metadata(row[0])
+            merged.update(metadata)
             conn.execute(
-                "UPDATE episodes SET salience = MIN(1.0, salience + ?), "
-                "timestamp = CURRENT_TIMESTAMP WHERE id = ?",
-                (salience_step, ep_id),
+                "UPDATE episodes SET metadata = ? WHERE id = ?",
+                (json.dumps(merged), ep_id),
             )
-            return conn.total_changes > 0
+            return True
 
     def get_recent_episodes(self, limit=50) -> list:
         with self._conn() as conn:

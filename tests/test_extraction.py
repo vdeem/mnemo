@@ -43,6 +43,62 @@ def test_entity_possessive_is_stripped(consolidator):
     assert "alice's" not in entities
 
 
+def test_triple_endpoints_are_lemmatized(consolidator):
+    """Triple endpoints must use the same lemma keys as entity nodes."""
+    triples = consolidator.extract_triples("The dogs chase the cats.")
+    assert ("dog", "chase", "cat") in triples
+
+
+def test_negated_transitive_triple(consolidator):
+    assert ("alice", "not_like", "tea") in consolidator.extract_triples(
+        "Alice doesn't like tea."
+    )
+
+
+def test_negated_copula_triple(consolidator):
+    assert ("jack", "is_not_a", "dog") in consolidator.extract_triples(
+        "Jack is not a dog."
+    )
+
+
+def test_negated_intransitive_triple(consolidator):
+    assert ("alice", "did", "not_sleep") in consolidator.extract_triples(
+        "Alice did not sleep."
+    )
+
+
+def test_negated_prepositional_triple(consolidator):
+    assert ("bob", "not_work", "google") in consolidator.extract_triples(
+        "Bob does not work at Google."
+    )
+
+
+def test_coordinated_verbs_inherit_subject(consolidator):
+    triples = consolidator.extract_triples("The user writes and reviews code.")
+    assert ("user", "did", "write") in triples
+    assert ("user", "review", "code") in triples
+
+
+def test_clausal_complement_yields_the_fact(consolidator):
+    triples = consolidator.extract_triples("I think Bob likes tea.")
+    assert ("bob", "like", "tea") in triples
+    assert ("i", "did", "think") not in triples
+
+
+def test_nested_entity_does_not_add_head_noun(consolidator):
+    names = set(consolidator.extract_entities("I live in New York."))
+    assert "new york" in names
+    assert "york" not in names
+
+
+def test_noun_chunk_display_keeps_casing(consolidator):
+    mentions = {
+        mention["name"]: mention
+        for mention in consolidator.extract_entity_mentions("Dogs are loud.")
+    }
+    assert mentions["dog"]["display_name"] == "Dogs"
+
+
 def test_entity_mentions_keep_display_name_and_type(consolidator):
     mentions = {
         m["name"]: m

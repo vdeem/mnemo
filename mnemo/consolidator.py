@@ -11,6 +11,7 @@ from itertools import combinations, islice
 
 import spacy
 from spacy.cli import download as spacy_download
+from spacy.tokens import Token
 
 from ._constants import GENERIC_NOUNS
 
@@ -71,98 +72,139 @@ class Consolidator:
         """Entity mentions for a parsed ``Doc`` or ``Span``."""
         mentions: dict[str, dict] = {}
 
-        def remember(raw: str, node_type: str) -> None:
+        def remember(raw: str, node_type: str, name: str | None = None) -> None:
             display = _strip_possessive(raw)
-            name = display.lower()
-            if not name or name in GENERIC_NOUNS:
+            key = (name or display).lower()
+            if not key or key in GENERIC_NOUNS:
                 return
-            if name not in mentions:
-                mentions[name] = {
-                    "name": name,
-                    "display_name": display or name,
+            if key not in mentions:
+                mentions[key] = {
+                    "name": key,
+                    "display_name": display or key,
                     "node_type": node_type,
                 }
-            elif mentions[name]["node_type"] == "entity" and node_type != "entity":
+            elif mentions[key]["node_type"] == "entity" and node_type != "entity":
                 # A typed NER hit outranks a bare noun chunk for the same word.
-                mentions[name]["node_type"] = node_type
+                mentions[key]["node_type"] = node_type
 
         # Named entities first: their label is the most specific node type.
-        for ent in doc.ents:
-            if ent.label_ in ENTITY_LABELS:
-                remember(ent.text, ent.label_)
+        named = [ent for ent in doc.ents if ent.label_ in ENTITY_LABELS]
+        for ent in named:
+            remember(ent.text, ent.label_)
 
         # Nouns (core concepts), keyed by lemma so "dog"/"dogs" become "dog".
+        # Chunks whose head is inside a named entity are skipped: "York" in
+        # "New York" and "Corp" in "Acme Corp." are not separate concepts.
         for chunk in doc.noun_chunks:
             root = chunk.root
             if root.pos_ not in ("NOUN", "PROPN"):
                 continue  # pronouns ("It") are not concepts
+            if any(ent.start <= root.i < ent.end for ent in named):
+                continue
             lemma = root.lemma_.lower()
             if len(lemma) <= 2 or self.nlp.vocab[lemma].is_stop:
                 continue
-            remember(root.lemma_, "entity")
+            # Keep the original casing for humans, key the node by lemma.
+            remember(root.text, "entity", name=lemma)
 
         return list(mentions.values())
 
     def extract_triples(self, text: str) -> list[tuple[str, str, str]]:
-        """
-        Extracts (subject, predicate, object) triples using SpaCy dependency parsing.
+        """Extract (subject, predicate, object) triples with dependency parsing.
+
         Examples:
-          "Jack is a dog" -> ("jack", "is_a", "dog")
-          "user won a lottery" -> ("user", "won", "lottery")
+          "Jack is a dog." -> ("jack", "is_a", "dog")
+          "user won a lottery" -> ("user", "win", "lottery")
+          "Alice doesn't like tea." -> ("alice", "not_like", "tea")
         """
         return self._triples(self.nlp(text))
 
+    @staticmethod
+    def _lemma(token: Token) -> str:
+        return (token.lemma_ or token.text).lower().strip()
+
+    @staticmethod
+    def _is_negated(token: Token) -> bool:
+        return any(child.dep_ == "neg" for child in token.children)
+
+    @staticmethod
+    def _subject(token: Token) -> Token | None:
+        for child in token.children:
+            if child.dep_ in ("nsubj", "nsubjpass"):
+                return child
+        # Coordinated verbs share the subject of their head verb:
+        # "Alice sings and dances" -> both verbs are about Alice.
+        if token.dep_ == "conj" and token.head.pos_ in ("VERB", "AUX"):
+            for child in token.head.children:
+                if child.dep_ in ("nsubj", "nsubjpass"):
+                    return child
+        return None
+
+    @staticmethod
+    def _object(token: Token) -> Token | None:
+        for child in token.children:
+            if child.dep_ in ("dobj", "pobj"):
+                return child
+            if child.dep_ == "prep":
+                for p_child in child.children:
+                    if p_child.dep_ == "pobj":
+                        return p_child
+        return None
+
     def _triples(self, doc) -> list[tuple[str, str, str]]:
-        triples = []
+        triples: list[tuple[str, str, str]] = []
 
         for token in doc:
-            # 1. Subject-Verb-Object (user won lottery)
-            if token.dep_ == "ROOT" and token.pos_ == "VERB":
-                subj = None
-                obj = None
-                for child in token.children:
-                    if child.dep_ in ("nsubj", "nsubjpass"):
-                        subj = child.text.lower()
-                    elif child.dep_ in ("dobj", "pobj"):
-                        obj = child.text.lower()
-                    # Handle prepositional objects (e.g., "won a lottery")
-                    elif child.dep_ == "prep":
-                        for p_child in child.children:
-                            if p_child.dep_ == "pobj":
-                                obj = p_child.text.lower()
+            # 1. Subject-Copula-Complement (Jack is a dog). "is" is AUX in
+            # spaCy, so this branch must run before the VERB filter.
+            if token.lemma_ == "be" and token.pos_ in ("AUX", "VERB"):
+                subj = self._subject(token)
+                comp = next(
+                    (child for child in token.children if child.dep_ in ("attr", "acomp")),
+                    None,
+                )
+                if subj is not None and comp is not None:
+                    relation = "is_not_a" if self._is_negated(token) else "is_a"
+                    triples.append((self._lemma(subj), relation, self._lemma(comp)))
+                continue
 
-                if subj and obj:
-                    # Transitive verb: Subject + Verb + Object
-                    triples.append((subj, token.lemma_.lower(), obj))
-                elif subj and not obj:
-                    # Intransitive verb: Subject + Verb (no object)
-                    # Build verb phrase including particles (e.g., "pass away", "wake up")
-                    verb_phrase = token.lemma_.lower()
-                    for child in token.children:
-                        if child.dep_ == "prt":
-                            verb_phrase = verb_phrase + "_" + child.text.lower()
-                    triples.append((subj, "did", verb_phrase))
+            if token.pos_ != "VERB":
+                continue
 
-            # 2. Subject-Copula-Complement (Jack is a dog)
-            elif token.dep_ == "ROOT" and token.lemma_ == "be":
-                subj = None
-                comp = None
-                for child in token.children:
-                    if child.dep_ in ("nsubj", "nsubjpass"):
-                        subj = child.text.lower()
-                    elif child.dep_ in ("attr", "acomp"):
-                        # If it's a noun phrase, take the head noun
-                        comp = child.text.lower()
+            subj = self._subject(token)
+            if subj is None:
+                continue
 
-                if subj and comp:
-                    triples.append((subj, "is_a", comp))
+            obj = self._object(token)
+            negated = self._is_negated(token)
 
-        # 3. Possessions (User's dog)
+            if obj is not None:
+                # 2. Subject-Verb-Object (user won lottery).
+                predicate = ("not_" if negated else "") + self._lemma(token)
+                triples.append((self._lemma(subj), predicate, self._lemma(obj)))
+                continue
+
+            # A clausal complement carries the actual fact: "I think Bob likes
+            # tea" should yield Bob/like/tea, not I/did/think.
+            if any(child.dep_ in ("ccomp", "xcomp") for child in token.children):
+                continue
+
+            # 3. Intransitive verb: Subject + Verb (no object). Keep particles
+            # in the verb phrase ("pass away", "wake up").
+            verb_phrase = self._lemma(token)
+            for child in token.children:
+                if child.dep_ == "prt":
+                    verb_phrase = f"{verb_phrase}_{self._lemma(child)}"
+            if negated:
+                verb_phrase = f"not_{verb_phrase}"
+            triples.append((self._lemma(subj), "did", verb_phrase))
+
+        # 4. Possessions (User's dog).
         for token in doc:
             if token.dep_ == "poss":
-                subj = token.text.lower()
-                head = token.head.text.lower()
-                triples.append((subj, "has_a", head))
+                triples.append(
+                    (self._lemma(token), "has_a", self._lemma(token.head))
+                )
 
         return list(set(triples))  # Remove duplicates
 

@@ -201,6 +201,29 @@ def test_delete_episodes_does_not_orphan_nodes(db, tmp_db_path):
     assert remaining == {"alice", "bob", "fresh"}
 
 
+def test_episode_content_is_indexed(db, tmp_db_path):
+    with sqlite3.connect(tmp_db_path) as conn:
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(episodes)")}
+
+    assert "idx_episodes_content" in indexes
+
+
+def test_decay_prunes_orphan_nodes(db, tmp_db_path):
+    ep_id = db.add_episode("Alice knows Bob.")
+    alice = db.get_or_create_node("alice")
+    bob = db.get_or_create_node("bob")
+    db.reinforce_edge(alice, bob, relation="knows", episode_id=ep_id)
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.execute("UPDATE edges SET last_reinforced = '2000-01-01 00:00:00'")
+        conn.commit()
+
+    assert db.decay_edges(0.1, 0.05) > 0
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0] == 0
+
+
 def test_parse_utc_treats_naive_timestamps_as_utc():
     naive = parse_utc("2024-01-02 03:04:05")
     assert naive == datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)

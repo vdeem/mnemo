@@ -155,6 +155,23 @@ def test_delete_episode_forgets_graph_facts(mnemo):
     assert mnemo.recall("tea")["facts"] == []
 
 
+def test_cooccurrence_is_undirected(mnemo, tmp_db_path):
+    mnemo.add("Zoe paid Yuri.", dedupe=False)
+    mnemo.add("Yuri was seen with Zoe.", dedupe=False)
+    mnemo.consolidate()
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        rows = conn.execute(
+            "SELECT n1.name, n2.name FROM edges e "
+            "JOIN nodes n1 ON e.source_id = n1.id "
+            "JOIN nodes n2 ON e.target_id = n2.id "
+            "WHERE e.relation = 'co_occurs' "
+            "AND n1.name IN ('zoe', 'yuri') AND n2.name IN ('zoe', 'yuri')"
+        ).fetchall()
+
+    assert len(rows) == 1
+
+
 def test_cooccurrence_is_sentence_scoped(mnemo, tmp_db_path):
     mnemo.add("Ava met Ben. Cleo met Dan. Eve met Finn.")
     mnemo.consolidate()

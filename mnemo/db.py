@@ -142,6 +142,7 @@ class Database:
                         affected += 1
 
             
+            self._delete_orphan_nodes(conn, None)
             return affected
 
     def _init_db(self):
@@ -155,6 +156,9 @@ class Database:
                     metadata JSON,
                     consolidated_at DATETIME
                 );
+                -- Exact-content lookups run on every add(); keep them indexed.
+                CREATE INDEX IF NOT EXISTS idx_episodes_content
+                    ON episodes(content);
                 CREATE TABLE IF NOT EXISTS nodes (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL UNIQUE,
@@ -549,14 +553,22 @@ class Database:
             return deleted
 
     @staticmethod
-    def _delete_orphan_nodes(conn: sqlite3.Connection, grace_days: int) -> int:
-        cursor = conn.execute(
-            "DELETE FROM nodes WHERE NOT EXISTS ("
+    def _delete_orphan_nodes(conn: sqlite3.Connection,
+                             grace_days: int | None = ORPHAN_NODE_GRACE_DAYS) -> int:
+        orphan = (
+            "NOT EXISTS ("
             "    SELECT 1 FROM edges"
             "    WHERE edges.source_id = nodes.id OR edges.target_id = nodes.id"
-            ") AND last_seen < datetime('now', ?)",
-            (f"-{int(grace_days)} days",),
+            ")"
         )
+        if grace_days is None:
+            # decay() removed the facts themselves, so their concepts go too.
+            cursor = conn.execute(f"DELETE FROM nodes WHERE {orphan}")
+        else:
+            cursor = conn.execute(
+                f"DELETE FROM nodes WHERE {orphan} AND last_seen < datetime('now', ?)",
+                (f"-{int(grace_days)} days",),
+            )
         return cursor.rowcount
 
     def all_episodes(self) -> list:

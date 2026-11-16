@@ -242,8 +242,10 @@ class Consolidator:
                         )
                         for mention in self._entity_mentions(sent)
                     ]
+                    # Sort ids so co_occurs is undirected: "Zoe and Yuri" and
+                    # "Yuri and Zoe" must reinforce one edge, not create two.
                     for left, right in islice(
-                        combinations(node_ids, 2), MAX_COOCCURRENCE_PAIRS
+                        combinations(sorted(node_ids), 2), MAX_COOCCURRENCE_PAIRS
                     ):
                         db.reinforce_edge(
                             left, right, relation="co_occurs", conn=conn,

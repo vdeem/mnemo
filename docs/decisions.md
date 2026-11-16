@@ -185,4 +185,38 @@ and `episode_id_for()` returns the first match. A near-duplicate text is still
 not stored (only its metadata/salience are merged); that remains a deliberate
 trade-off, documented in `docs/extraction.md`.
 
+## ADR-012 — MCP server owns a lifespan-scoped store in a stable directory
+
+**Decision:** `mnemo.server` no longer constructs `Mnemo` at import time. It
+resolves the store from `MNEMO_DATA_DIR` / `MNEMO_DB_PATH` /
+`MNEMO_CHROMA_PATH` (checkout root when running from a checkout, `~/.mnemo`
+otherwise), opens it in an `MCPServer` lifespan, and closes Chroma on shutdown.
+Tools access it through `Context.request_context.lifespan_context`, raise
+`ToolError`, and offload blocking calls with `anyio.to_thread`.
+
+**Why:** a client launching the server from an arbitrary CWD got a fresh empty
+memory because the paths were relative. Import-time construction also loaded
+the model and created files during any import, and the process never called
+`close()`.
+
+**Consequences:** the server can be pointed at a shared store explicitly;
+default data lives outside the launch directory. Tool failures are protocol
+errors (`isError`) instead of success strings. `delete_memory` and
+`decay_memory` make forgetting available over MCP, not only in Python.
+
+## ADR-013 — graph lifecycle hygiene
+
+**Decision:** `episodes.content` gets `idx_episodes_content`; `co_occurs`
+endpoints are sorted by node id so the relation is undirected; `decay()` prunes
+nodes that lose all edges.
+
+**Why:** every `add()` did an exact-content lookup on a scanned table.
+Reversed mentions created two `co_occurs` edges with split weights. A fully
+decayed graph kept its concept nodes forever, so the brief showed stale
+concepts with no facts behind them.
+
+**Consequences:** exact lookups scale, `co_occurs` has one row per pair, and a
+decayed graph becomes empty. Nodes still get the 7-day grace when an episode is
+deleted (a node can be shared); decay uses no grace because the facts are gone.
+
 

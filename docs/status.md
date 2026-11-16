@@ -84,19 +84,47 @@ to 0.5 (cosine >= 0.75); widen it per call or with `MNEMO_MAX_DISTANCE`.
 row. Repeats merge metadata and raise salience to the requested floor; salience
 is clamped to 0..1 on the way in.
 
+### 8. MCP server hardening (`ed9b3a8`)
+
+The server no longer opens Mnemo at import time and no longer resolves
+`mnemo_mcp.db` relative to the launch CWD. `MNEMO_DATA_DIR`,
+`MNEMO_DB_PATH` and `MNEMO_CHROMA_PATH` control the store; defaults are the
+checkout root (when `pyproject.toml` is present) or `~/.mnemo`. The store is
+opened in an `MCPServer` lifespan and closed on shutdown. Tools raise
+`ToolError` instead of returning `"Error: ..."` strings, blocking calls run in
+a worker thread, `add_memory` accepts `salience`/`dedupe`, `recall_memory`
+accepts `max_distance`, and new `delete_memory`/`decay_memory` tools expose
+forgetting.
+
+### 9. Storage and graph hygiene (`12d4d68`)
+
+`idx_episodes_content` indexes the exact-content lookup every `add()` performs.
+`co_occurs` endpoints are sorted by node id, so reversed mentions reinforce one
+edge instead of creating two. `decay()` prunes nodes that lose all edges, so a
+fully decayed graph no longer leaves stale concepts in the brief.
+
+### 10. Input and config guards (`34074d7`)
+
+`RecallWeights` is frozen, so presets cannot be mutated in place. `add()`
+rejects empty/whitespace text. The embedder warns when an episode exceeds the
+model token limit because only the first tokens are searchable.
+
 ## Current state
 
-- Tests: **76 passed** (`pytest -q`), including new coverage for orphan-vector
+- Tests: **85 passed** (`pytest -q`), including new coverage for orphan-vector
   pruning, re-add durability, shared-edge deletion, provenance cascade on decay,
   a simulated mid-pass consolidation crash, negation, lemmatized endpoints,
-  coordinated verbs, nested entities, fact deduplication/capping and dedupe
-  semantics.
+  coordinated verbs, nested entities, fact deduplication/capping, dedupe
+  semantics, the content index, undirected `co_occurs`, decay node pruning,
+  frozen presets, blank input, truncation warnings and server path resolution.
 - Defaults: `max_distance=0.5`, `MAX_RECALL_FACTS=20`, negation-aware
-  predicates, lemmatized triple endpoints.
+  predicates, lemmatized triple endpoints, frozen `RecallWeights`.
 - `add(..., dedupe=False)` stores duplicates; `dedupe=True` merges metadata and
-  raises salience to the requested floor.
-- Schema: `episodes`, `nodes`, `edges`, `edges_archive`, `episode_edges`.
-- Public API unchanged; schema additions are idempotent and additive.
+  raises salience to the requested floor; blank text raises `ValueError`.
+- Schema: `episodes` (+ `idx_episodes_content`), `nodes`, `edges`,
+  `edges_archive`, `episode_edges`.
+- Public Python API unchanged; MCP adds `delete_memory` and `decay_memory`.
+  Schema additions are idempotent and additive.
 - Existing databases keep working. Facts extracted before `episode_edges`
   existed cannot be attributed to an episode, so deleting old episodes does not
   remove those legacy edges.
@@ -106,10 +134,13 @@ is clamped to 0..1 on the way in.
 ```powershell
 .\venv\Scripts\python.exe -m pytest -q
 python test_mcp_client.py   # needs unrestricted process/pipe creation
+python -m mnemo.server      # stdio MCP server
 ```
 
-On Windows, if `%TEMP%` is not writable the test suite falls back to
-`.pytest_tmp/` automatically; `pytest -q --basetemp=.pytest_tmp` forces it.
+The MCP store is controlled by `MNEMO_DATA_DIR`, `MNEMO_DB_PATH` and
+`MNEMO_CHROMA_PATH`. On Windows, if `%TEMP%` is not writable the test suite
+falls back to `.pytest_tmp/` automatically; `pytest -q --basetemp=.pytest_tmp`
+forces it.
 
 ## Roadmap
 
@@ -123,18 +154,13 @@ On Windows, if `%TEMP%` is not writable the test suite falls back to
 - Negation only reads the `neg` dependency; `no` (determiner) and `never`
   (adverb) are not marked.
 
-### P2 — operations and hardening
+### P2 — remaining operations and hardening
 
-- MCP server: paths are relative to the CWD; add env overrides and a lifespan
-  that closes Chroma. Expose `delete_memory`/`decay_memory`; raise `ToolError`
-  instead of returning `"Error: ..."` strings.
-- Add an index on `episodes.content` (every `add()` currently scans).
-- Freeze `RecallWeights` presets; reject empty text.
-- Chunk or warn for episodes longer than the encoder's 512-token limit.
-- Canonical ordering for `co_occurs` (it is currently directed by mention
-  order, so reversed mentions create a second edge).
-- Prune orphan nodes on `decay`, not only on `delete_episodes`.
-- Pin dependencies and add CI (lint, coverage, hermetic MCP smoke test).
+- Pin dependencies and add CI (lint, coverage).
+- Make `test_mcp_client.py` hermetic: temp data dir via `MNEMO_DATA_DIR`,
+  assertions on add/consolidate/recall/delete/decay instead of prints.
+- Optionally chunk episodes longer than the 512-token encoder limit into
+  multiple vectors instead of only warning.
 
 ### P3 — packaging and docs
 

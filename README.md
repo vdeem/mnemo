@@ -54,12 +54,28 @@ results = mnemo.recall("What technologies is Bob using?")
 print(results["episodes"])  # Raw texts from vector search
 print(results["facts"])     # Graph relations (Bob -> pytorch)
 
-# 4. Tighten recall: drop anything farther than max_distance (cosine, 0..2)
+# 4. Tighten recall: drop anything past the distance cutoff
+# (0.5 squared-L2 = cosine 0.75 on normalized embeddings)
 results = mnemo.recall("What technologies is Bob using?", k=3, max_distance=0.5)
 
-# 5. Delete a memory (removes the episode and its vector)
+# 5. Delete a memory (episode, vector and its graph contributions)
 mnemo.delete([episode_id])
 ```
+
+## MCP server
+
+```bash
+python -m mnemo.server
+```
+
+The server exposes `add_memory`, `recall_memory`, `consolidate_memory`,
+`delete_memory` and `decay_memory` over stdio. It opens the store in an MCP
+lifespan and closes Chroma on shutdown.
+
+By default the store lives in the checkout root (when running from a checkout)
+or `~/.mnemo`; override it with `MNEMO_DATA_DIR`, `MNEMO_DB_PATH` or
+`MNEMO_CHROMA_PATH`. This keeps the memory location independent of the
+directory the MCP client launches the server from.
 
 ## How it works
 
@@ -78,6 +94,7 @@ mnemo.delete([episode_id])
 - [~] Multi-language support — partial: retrieval is multilingual, spaCy extraction is still English-only
 - [x] Phase 2 — Agent context brief
 - [x] Reliability hardening and negation-aware extraction
+- [x] MCP server hardening and graph lifecycle
 - [ ] Phase 2b — RAG adapters
 
 See [docs/status.md](docs/status.md) for the current status, recent changes and the detailed roadmap, and [docs/extraction.md](docs/extraction.md) for the extraction rules.

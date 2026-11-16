@@ -1,4 +1,5 @@
-chromadb
-sentence-transformers
-spacy
-mcp
+chromadb>=1.5,<2
+sentence-transformers>=3,<7
+spacy>=3.7,<4
+mcp>=2,<3
+anyio>=4,<5

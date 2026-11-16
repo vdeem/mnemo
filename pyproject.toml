@@ -11,11 +11,18 @@ requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "vdeem"}]
 dependencies = [
-    "chromadb",
-    "sentence-transformers",
-    "spacy",
-    "mcp",
+    "chromadb>=1.5,<2",
+    "sentence-transformers>=3,<7",
+    "spacy>=3.7,<4",
+    "mcp>=2,<3",
+    "anyio>=4,<5",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+mnemo-server = "mnemo.server:main"
 
 [project.urls]
 Homepage = "https://github.com/vdeem/mnemo"
@@ -23,3 +30,6 @@ Homepage = "https://github.com/vdeem/mnemo"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["mnemo*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

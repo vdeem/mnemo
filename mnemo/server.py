@@ -217,5 +217,10 @@ async def decay_memory(
     return f"Decayed {affected} edges."
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Run the Mnemo MCP server over stdio."""
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

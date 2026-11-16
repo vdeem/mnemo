@@ -109,8 +109,23 @@ fully decayed graph no longer leaves stale concepts in the brief.
 rejects empty/whitespace text. The embedder warns when an episode exceeds the
 model token limit because only the first tokens are searchable.
 
+### 11. Packaging, CI and hermetic smoke (`ca150c6`, `daec30a`)
+
+`test_mcp_client.py` now runs against a temporary `MNEMO_DATA_DIR`, asserts the
+full add/consolidate/recall/delete/decay cycle (and a `ToolError` for blank
+input), and points the child `TEMP`/`TMP` at the workspace data dir so Chroma
+can create its SQLite store under a restricted token.
+
+Runtime dependencies carry major-version bounds in both `pyproject.toml` and
+`requirements.txt`; `anyio` is declared directly (the server imports it) and
+`pytest` moved to a `[dev]` extra. `mnemo-server` is a console entry point,
+`pytest` collects only `tests/`, and `.github/workflows/tests.yml` runs the
+suite on Python 3.10-3.12.
+
 ## Current state
 
+- CI: `.github/workflows/tests.yml` runs the suite on Python 3.10-3.12;
+  runtime deps are bounded in `pyproject.toml` and `requirements.txt`.
 - Tests: **85 passed** (`pytest -q`), including new coverage for orphan-vector
   pruning, re-add durability, shared-edge deletion, provenance cascade on decay,
   a simulated mid-pass consolidation crash, negation, lemmatized endpoints,
@@ -132,9 +147,10 @@ model token limit because only the first tokens are searchable.
 ## Running
 
 ```powershell
+pip install -e ".[dev]"
 .\venv\Scripts\python.exe -m pytest -q
-python test_mcp_client.py   # needs unrestricted process/pipe creation
-python -m mnemo.server      # stdio MCP server
+python test_mcp_client.py   # hermetic; needs unrestricted process/pipe creation
+python -m mnemo.server      # or: mnemo-server
 ```
 
 The MCP store is controlled by `MNEMO_DATA_DIR`, `MNEMO_DB_PATH` and
@@ -156,13 +172,10 @@ forces it.
 
 ### P2 — remaining operations and hardening
 
-- Pin dependencies and add CI (lint, coverage).
-- Make `test_mcp_client.py` hermetic: temp data dir via `MNEMO_DATA_DIR`,
-  assertions on add/consolidate/recall/delete/decay instead of prints.
 - Optionally chunk episodes longer than the 512-token encoder limit into
   multiple vectors instead of only warning.
+- Add lint, typing and coverage steps to CI (it currently runs tests only).
 
 ### P3 — packaging and docs
 
 - `docs/skill.md` is still missing.
-- Console entry point and a `dev` extras group.

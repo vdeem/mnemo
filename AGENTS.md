@@ -10,14 +10,15 @@
 ## Dependencies
 - `scikit-learn` and `networkx` were removed in `0.x`: nothing imports them since DBSCAN was dropped. Do not re-add either without an approved dependency change.
 - New dependencies require: (a) update `pyproject.toml` **and** `requirements.txt` in one commit, (b) an explicit note in the commit message. Prefer stdlib.
+- Runtime deps carry major-version bounds in both files; keep them in sync. `anyio` is a direct dependency because `server.py` imports it.
 
 ## Essential Commands
-- **Install (editable):** `pip install -e .`
+- **Install (editable, with dev tools):** `pip install -e ".[dev]"`
 - **Download spaCy model (once):** `python -m spacy download en_core_web_sm`
 - **Run all tests:** `pytest -q` (must stay green after every change)
 - **Run a single test file:** `pytest -q tests/test_extraction.py`
 - **Windows/sandboxed temp:** if `%TEMP%` is not writable, `tests/conftest.py` moves pytest's temp root to `.pytest_tmp/` (gitignored); force it with `pytest -q --basetemp=.pytest_tmp`.
-- **Start MCP server (stdio):** `python -m mnemo.server`
+- **Start MCP server (stdio):** `python -m mnemo.server` or `mnemo-server`
 - **End-to-end MCP smoke test:** `python test_mcp_client.py` (spawns the server as a subprocess, so it needs unrestricted process/pipe creation)
 - **MCP store location:** `MNEMO_DATA_DIR`, `MNEMO_DB_PATH`, `MNEMO_CHROMA_PATH` (defaults: checkout root or `~/.mnemo`).
 - **MCP protocol/security check (before any release):** `mcpdoctor`
@@ -124,6 +125,8 @@ session start. It is a projection of SQLite, never a second source of truth.
   - `recall` returns non-empty for an exact-match query and honours `max_distance`.
   - `RecallWeights` presets actually change ranking (`balanced` vs `emotional`), and env/explicit precedence holds.
   - The agent brief excludes `co_occurs`, is deterministic, and is not rewritten by a no-op consolidation.
+- `pytest` is configured with `testpaths = ["tests"]`; the root `test_mcp_client.py` is run manually.
+- CI: `.github/workflows/tests.yml` installs `.[dev]`, downloads the spaCy model and runs the suite on Python 3.10-3.12.
 - Run `pytest -q` and `python test_mcp_client.py` before declaring a task done.
 
 ## Docs (Progressive Disclosure)

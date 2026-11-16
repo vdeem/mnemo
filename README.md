@@ -31,6 +31,12 @@ Mnemo takes a different approach: **cognitive consolidation**. It uses local NLP
 pip install -r requirements.txt
 ```
 
+For development (includes `pytest`):
+
+```bash
+pip install -e ".[dev]"
+```
+
 The spaCy pipeline (`en_core_web_sm`) and the embedding model (`intfloat/multilingual-e5-small`) download automatically on first run.
 
 ## Quick Start
@@ -66,6 +72,8 @@ mnemo.delete([episode_id])
 
 ```bash
 python -m mnemo.server
+# or, after an editable install:
+mnemo-server
 ```
 
 The server exposes `add_memory`, `recall_memory`, `consolidate_memory`,
@@ -95,6 +103,7 @@ directory the MCP client launches the server from.
 - [x] Phase 2 — Agent context brief
 - [x] Reliability hardening and negation-aware extraction
 - [x] MCP server hardening and graph lifecycle
+- [x] Packaging, CI and hermetic MCP smoke
 - [ ] Phase 2b — RAG adapters
 
 See [docs/status.md](docs/status.md) for the current status, recent changes and the detailed roadmap, and [docs/extraction.md](docs/extraction.md) for the extraction rules.

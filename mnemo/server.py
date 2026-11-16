@@ -58,7 +58,10 @@ async def lifespan(_server: MCPServer) -> AsyncIterator[Mnemo]:
     db_path = _db_path()
     chroma_path = _chroma_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    chroma_path.parent.mkdir(parents=True, exist_ok=True)
+    # Create the persist directory ourselves: on Windows a restricted token can
+    # allow file writes in a new temp dir while denying a nested mkdir, which
+    # makes Chroma fail with SQLITE_CANTOPEN (code 14).
+    chroma_path.mkdir(parents=True, exist_ok=True)
     log.info("opening Mnemo at %s (chroma: %s)", db_path, chroma_path)
     memory = Mnemo(db_path=str(db_path), chroma_path=str(chroma_path))
     try:

@@ -1,5 +1,8 @@
 """Recall behaviour tests."""
 
+import logging
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from mnemo.core import (
@@ -261,6 +264,23 @@ def test_salience_is_clamped(mnemo):
     ep_id = mnemo.add("A very vivid memory.", salience=7.5)
 
     assert mnemo.db.get_episode_details([ep_id])[ep_id]["salience"] == 1.0
+
+
+def test_add_rejects_blank_text(mnemo):
+    with pytest.raises(ValueError, match="must not be empty"):
+        mnemo.add("   ")
+
+
+def test_long_episode_warns_about_truncation(mnemo, caplog):
+    with caplog.at_level(logging.WARNING, logger="mnemo.embedder"):
+        mnemo.add("The user likes coffee. " * 300)
+
+    assert any("keeps only" in record.getMessage() for record in caplog.records)
+
+
+def test_recall_weights_are_frozen():
+    with pytest.raises(FrozenInstanceError):
+        PRESETS["balanced"].salience = 0.9
 
 
 def test_recall_facts_are_capped(mnemo):

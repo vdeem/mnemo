@@ -13,7 +13,7 @@ from .embedder import Embedder
 log = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True)
 class RecallWeights:
     """Multipliers for the non-semantic signals in ``recall()``.
 
@@ -93,6 +93,8 @@ class Mnemo:
         its metadata is merged and its timestamp is refreshed. Pass
         ``dedupe=False`` to store identical text as a separate episode.
         """
+        if not text or not text.strip():
+            raise ValueError("text must not be empty")
         salience = max(0.0, min(1.0, float(salience)))
 
         existing = self.db.episode_id_for(text) if dedupe else None

@@ -1,7 +1,10 @@
+import logging
 import os
 
 import chromadb
 from sentence_transformers import SentenceTransformer
+
+log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = os.getenv(
     "MNEMO_EMBED_MODEL", "intfloat/multilingual-e5-small"
@@ -33,9 +36,35 @@ class Embedder:
             name=f"mnemo_episodes_{_slug(self.model_name)}"
         )
 
+    def _warn_if_truncated(self, documents: list[str]) -> None:
+        """Warn when an episode is longer than the encoder can see."""
+        max_tokens = getattr(self.model, "max_seq_length", 0) or 0
+        if not max_tokens:
+            return
+        for document in documents:
+            # Cheap guard: tokenisation is not free on every add().
+            if len(document) <= max_tokens * 4:
+                continue
+            try:
+                token_ids = self.model.tokenizer(
+                    document, truncation=False, add_special_tokens=False
+                )["input_ids"]
+            except Exception:
+                return
+            if len(token_ids) > max_tokens:
+                log.warning(
+                    "episode has %d tokens; %s keeps only %d, so the rest is "
+                    "stored but not searchable",
+                    len(token_ids),
+                    self.model_name,
+                    max_tokens,
+                )
+                return
+
     def add(self, ids: list, documents: list):
         if not ids:
             return
+        self._warn_if_truncated(documents)
         texts = [f"passage: {d}" for d in documents] if _is_e5(self.model_name) else documents
         embeddings = self.model.encode(
             texts, normalize_embeddings=True

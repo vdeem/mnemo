@@ -170,20 +170,30 @@ recalibration. `k` still controls episodes only; facts have their own cap.
 
 ## ADR-011 — dedupe semantics
 
-**Decision:** `add(..., dedupe=True)` merges exact and near duplicates: the
+**Decision:** `add(..., dedupe=True)` merges only exact duplicate text: the
 existing episode gets a salience floor, merged metadata and a fresh timestamp.
-`dedupe=False` inserts a separate row even for identical text. Salience is
-clamped to 0..1 on every add.
+A near-duplicate text is stored as a separate episode. `dedupe=False` inserts a
+separate row even for identical text. Salience is clamped to 0..1 on every add.
 
 **Why:** `dedupe=False` used to return the existing id anyway, so the flag was
 a lie; repeat adds silently discarded new metadata and ignored an explicit
 higher salience, which made "this memory matters more now" impossible to
 express.
 
-**Consequences:** duplicate content is allowed when the caller asks for it,
-and `episode_id_for()` returns the first match. A near-duplicate text is still
-not stored (only its metadata/salience are merged); that remains a deliberate
-trade-off, documented in `docs/extraction.md`.
+Near-duplicate merging was removed during the 2026-11-17 correctness pass.
+Embedding distance cannot distinguish a paraphrase from a correction: "The
+user prefers dark mode." and "The user prefers light mode." are only ~0.088
+squared-L2 apart on the default e5 model, so the second add was merged into the
+first and the corrected fact was lost. A memory engine must never silently
+drop the newer statement.
+
+**Consequences:** exact repeats still merge metadata and raise salience.
+Near-duplicate paraphrases are stored as separate episodes and both can be
+recalled. `add()` no longer pays for an extra encode to detect near duplicates.
+There is no automatic "latest wording wins" replacement; callers that need a
+correction add the new text and delete the old episode explicitly. Near-
+duplicate detection may be revisited only with a semantic-equivalence check,
+not vector proximity alone.
 
 ## ADR-012 — MCP server owns a lifespan-scoped store in a stable directory
 

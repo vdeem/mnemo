@@ -68,7 +68,7 @@ Enforce these invariants. If existing code violates one, fix it as part of your 
 - **MCP tools are thin wrappers.** `server.py` tools parse args, call `Mnemo` through the lifespan context, and serialize the result. No NLP, no SQL, no business rules there. Raise `ToolError` (never return an `"Error: ..."` string); offload blocking calls with `anyio.to_thread`.
 - **Configurable recall weights.** The salience/valence/recency multipliers used by `recall()` live in a frozen `RecallWeights` (`mnemo/core.py`, exported from the `mnemo` package) with named `PRESETS` (`balanced`, `emotional`). Never reintroduce hardcoded numbers there. Resolution order: explicit `Mnemo(weights=...)` → `MNEMO_RECALL_PRESET` env var (unknown names raise `ValueError`) → `balanced`. Semantic similarity keeps its unit weight; `recency_halflife_days` feeds the existing `exp(-age_days / value)` decay (45.0 preserves the Phase 0 scores).
 - **Recall facts and distance.** `recall()["facts"]` is a typed projection: `co_occurs` edges are excluded, duplicates are merged by `(source, relation, target)`, and the list is sorted by weight and capped at `MAX_RECALL_FACTS` (20). `max_distance` defaults to `DEFAULT_MAX_DISTANCE` (0.5, i.e. cosine >= 0.75 on normalized e5 vectors) and is overridable per call or by `MNEMO_MAX_DISTANCE`.
-- **Dedupe semantics.** `add(..., dedupe=True)` merges exact and near duplicates: metadata is merged and salience is raised to the requested floor (clamped to 0..1). `dedupe=False` inserts a separate row even for identical text. Near-duplicate text itself is still dropped by design; only its metadata/salience are kept. Blank text raises `ValueError`.
+- **Dedupe semantics.** `add(..., dedupe=True)` merges only exact duplicate text: metadata is merged and salience is raised to the requested floor (clamped to 0..1). A near-duplicate text is stored as a separate episode, because embedding distance cannot distinguish a paraphrase from a correction ("dark mode" / "light mode" are close). `dedupe=False` inserts a separate row even for identical text. Blank text raises `ValueError`.
 - **Public API stability.** Keep `Mnemo.add / recall / consolidate / decay / delete` signatures backward-compatible within `0.x`. Optional kwargs are fine; renames need a deprecation path.
 - **Typing.** All public functions annotated. No `Any` without a docstring justification.
 
@@ -119,7 +119,7 @@ session start. It is a projection of SQLite, never a second source of truth.
   - Deleting an episode drops edges only it supported and keeps shared edges (`tests/test_db.py`).
   - Negated claims are stored with a `not_` predicate, and triple endpoints are lemmatized (`tests/test_extraction.py`).
   - `recall()["facts"]` excludes `co_occurs`, deduplicates and respects `MAX_RECALL_FACTS`.
-  - `dedupe=False` inserts a duplicate; a repeat `add()` merges metadata and raises salience.
+  - `dedupe=False` inserts a duplicate; a repeat `add()` merges metadata and raises salience; a near-duplicate correction is stored as a separate episode.
   - Duplicate `add()` of the same text does not raise and does not duplicate the episode.
   - `decay` reduces weights and archives edges below threshold.
   - `recall` returns non-empty for an exact-match query and honours `max_distance`.

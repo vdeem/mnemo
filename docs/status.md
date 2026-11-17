@@ -1,6 +1,6 @@
 # Mnemo status and roadmap
 
-_Last updated: 2026-11-14._
+_Last updated: 2026-11-17._
 
 ## What Mnemo is
 
@@ -14,7 +14,19 @@ stores and joins them at recall time:
 No OpenAI/Anthropic/Google call is made; spaCy and `sentence-transformers` run
 locally. SQLite is the source of truth and Chroma is a rebuildable index.
 
-## What changed in this session
+## Correctness pass (2026-11-17)
+
+### 1. Dedupe is exact-only
+
+`add(..., dedupe=True)` now merges only identical text. Near-duplicate text is
+stored as a separate episode because embedding distance cannot distinguish a
+paraphrase from a correction: "The user prefers dark mode." and "The user
+prefers light mode." are ~0.088 squared-L2 apart on the default e5 model, so
+the correction used to be merged into the stale row and lost. Exact repeats
+still merge metadata and raise salience to the requested floor. A regression
+test covers the correction case, and ADR-011 records the decision.
+
+## Previous hardening session (2026-11-14)
 
 ### 1. Tests run in sandboxed Windows (`dca7990`)
 
@@ -126,16 +138,18 @@ suite on Python 3.10-3.12.
 
 - CI: `.github/workflows/tests.yml` runs the suite on Python 3.10-3.12;
   runtime deps are bounded in `pyproject.toml` and `requirements.txt`.
-- Tests: **85 passed** (`pytest -q`), including new coverage for orphan-vector
-  pruning, re-add durability, shared-edge deletion, provenance cascade on decay,
-  a simulated mid-pass consolidation crash, negation, lemmatized endpoints,
-  coordinated verbs, nested entities, fact deduplication/capping, dedupe
-  semantics, the content index, undirected `co_occurs`, decay node pruning,
-  frozen presets, blank input, truncation warnings and server path resolution.
+- Tests: **86 passed** (`pytest -q`), including new coverage for exact-only
+  dedupe and near-duplicate corrections, orphan-vector pruning, re-add
+  durability, shared-edge deletion, provenance cascade on decay, a simulated
+  mid-pass consolidation crash, negation, lemmatized endpoints, coordinated
+  verbs, nested entities, fact deduplication/capping, the content index,
+  undirected `co_occurs`, decay node pruning, frozen presets, blank input,
+  truncation warnings and server path resolution.
 - Defaults: `max_distance=0.5`, `MAX_RECALL_FACTS=20`, negation-aware
   predicates, lemmatized triple endpoints, frozen `RecallWeights`.
-- `add(..., dedupe=False)` stores duplicates; `dedupe=True` merges metadata and
-  raises salience to the requested floor; blank text raises `ValueError`.
+- `add(..., dedupe=False)` stores duplicates; `dedupe=True` merges only exact
+  text, raises salience to the requested floor; near-duplicate corrections are
+  stored as separate episodes; blank text raises `ValueError`.
 - Schema: `episodes` (+ `idx_episodes_content`), `nodes`, `edges`,
   `edges_archive`, `episode_edges`.
 - Public Python API unchanged; MCP adds `delete_memory` and `decay_memory`.

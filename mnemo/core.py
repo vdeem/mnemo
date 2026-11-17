@@ -89,9 +89,12 @@ class Mnemo:
             dedupe: bool = True):
         """Add an episode. Salience (0-1) marks how emotionally vivid it is.
 
-        Repeats are merged: the existing episode gets a salience bump/floor,
-        its metadata is merged and its timestamp is refreshed. Pass
-        ``dedupe=False`` to store identical text as a separate episode.
+        Only exact duplicate text is merged: the existing episode gets a
+        salience bump/floor, its metadata is merged and its timestamp is
+        refreshed. Near-duplicate text is stored as a separate episode because
+        embedding distance cannot tell a paraphrase from a correction
+        ("dark mode" and "light mode" are close in embedding space). Pass
+        ``dedupe=False`` to store identical text as a separate episode too.
         """
         if not text or not text.strip():
             raise ValueError("text must not be empty")
@@ -107,44 +110,11 @@ class Mnemo:
                 self.embedder.add(ids=[existing], documents=[text])
             return existing
 
-        if dedupe:
-            duplicate = self._near_duplicate_id(
-                text, salience=salience, metadata=metadata
-            )
-            if duplicate:
-                return duplicate
-
         ep_id = self.db.add_episode(
             text, metadata, salience=salience, dedupe=dedupe
         )
         self.embedder.add(ids=[ep_id], documents=[text])
         return ep_id
-
-    def _near_duplicate_id(self, text: str, salience: float = 0.5,
-                           metadata: dict | None = None) -> str | None:
-        """Return the id of an existing near-duplicate episode, if any.
-
-        Only rows that still exist in SQLite count: a vector whose episode was
-        deleted is dropped instead of swallowing the new text forever.
-        """
-        max_distance = float(os.getenv("MNEMO_DEDUPE_DISTANCE", "0.10"))
-        try:
-            similar = self.embedder.find_similar(text, k=1)
-        except Exception as e:
-            log.warning("dedupe check failed: %s", e)
-            return None
-        if not similar:
-            return None
-        best = similar[0]
-        distance = best.get("distance")
-        if distance is None or distance > max_distance:
-            return None
-        if not self.db.episode_exists(best["id"]):
-            self.embedder.delete([best["id"]])
-            return None
-        self.db.reinforce_episode(best["id"], salience_floor=salience)
-        self.db.merge_episode_metadata(best["id"], metadata)
-        return best["id"]
 
     def consolidate(self, limit=50, write_brief: bool = True,
                     brief_path: str | None = None):

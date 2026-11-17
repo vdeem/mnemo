@@ -245,6 +245,23 @@ def test_add_dedupe_false_allows_identical_content(mnemo):
     assert len(mnemo.recall("The vault code is 1234.", k=5)["episodes"]) == 2
 
 
+def test_correction_is_not_swallowed_as_a_near_duplicate(mnemo):
+    """A correction is a new fact, not a duplicate to merge.
+
+    "dark mode" and "light mode" are ~0.09 squared-L2 apart on the default e5
+    model, so an embedding-distance dedupe used to keep only the stale text.
+    """
+    original = mnemo.add("The user prefers dark mode.")
+    corrected = mnemo.add("The user prefers light mode.")
+
+    assert corrected != original
+    assert {episode["content"] for episode in mnemo.db.all_episodes()} == {
+        "The user prefers dark mode.",
+        "The user prefers light mode.",
+    }
+    assert mnemo.embedder.collection.count() == 2
+
+
 def test_repeat_add_merges_metadata_and_salience(mnemo):
     ep_id = mnemo.add("The user likes green tea.", metadata={"source": "chat"})
 

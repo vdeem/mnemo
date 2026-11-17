@@ -226,6 +226,24 @@ def test_recall_facts_exclude_cooccurrence(mnemo):
     assert all(fact["relation"] != "co_occurs" for fact in facts)
 
 
+def test_query_entities_keep_generic_subjects(consolidator):
+    """A query may seed the graph with "user" even though it is not a concept."""
+    query = "What does the user like?"
+
+    assert "user" in consolidator.extract_query_entities(query)
+    assert "user" not in consolidator.extract_entities(query)
+
+
+def test_recall_finds_user_graph_facts(mnemo):
+    mnemo.add("The user likes coffee.")
+    mnemo.consolidate(write_brief=False)
+
+    facts = mnemo.recall("What does the user like?")["facts"]
+    keys = {(fact["source"], fact["relation"], fact["target"]) for fact in facts}
+
+    assert ("user", "like", "coffee") in keys
+
+
 def test_recall_facts_are_deduplicated(mnemo):
     mnemo.add("Alice knows Bob.")
     mnemo.consolidate()

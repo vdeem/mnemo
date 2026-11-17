@@ -229,4 +229,23 @@ concepts with no facts behind them.
 decayed graph becomes empty. Nodes still get the 7-day grace when an episode is
 deleted (a node can be shared); decay uses no grace because the facts are gone.
 
+## ADR-014 — query graph seeds include generic nouns
+
+**Decision:** `Consolidator.extract_query_entities()` feeds the graph lookup in
+`recall()` and keeps generic nouns such as `user` and `project`. The concept
+path (`extract_entities()`) continues to filter `GENERIC_NOUNS` for
+co-occurrence edges, the agent brief and active concepts.
+
+**Why:** memories are usually written from the user's perspective ("The user
+prefers dark mode"), but filtering `user` from every query seed meant that
+"What does the user like?" returned no facts even when the graph stored
+`user --[like]--> coffee`. The stop-list exists to keep concepts and the brief
+specific, not to hide the graph's main subject.
+
+**Consequences:** a query traverses a generic node only when the graph actually
+contains one; unknown nodes return no facts. Pronoun and stop-word filtering
+still applies. Consolidation still excludes generic nouns from entity nodes, so
+the triple writer is the only source of such nodes; its endpoint normalization
+is handled separately.
+
 

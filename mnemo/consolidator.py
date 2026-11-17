@@ -68,7 +68,23 @@ class Consolidator:
         """
         return self._entity_mentions(self.nlp(text))
 
-    def _entity_mentions(self, doc) -> list[dict]:
+    def extract_query_entities(self, text: str) -> list[str]:
+        """Entity names used as graph seeds for recall.
+
+        Unlike :meth:`extract_entities`, generic nouns are kept when they are
+        mentioned in a query: memories are usually written about "the user",
+        and the graph stores that node even though the word is too vague to
+        show as a concept in the brief. Pronouns and stop words are still
+        filtered.
+        """
+        return [
+            mention["name"]
+            for mention in self._entity_mentions(
+                self.nlp(text), include_generic=True
+            )
+        ]
+
+    def _entity_mentions(self, doc, include_generic: bool = False) -> list[dict]:
         """Entity mentions for a parsed ``Doc`` or ``Span``."""
         mentions: dict[str, dict] = {}
 
@@ -78,7 +94,7 @@ class Consolidator:
             # The display keeps it, but the graph key must match the version
             # without it ("Acme Corp is hiring").
             key = (name or display).lower().strip().rstrip(".").strip()
-            if not key or key in GENERIC_NOUNS:
+            if not key or (not include_generic and key in GENERIC_NOUNS):
                 return
             if key not in mentions:
                 mentions[key] = {

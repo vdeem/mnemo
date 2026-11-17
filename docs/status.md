@@ -26,6 +26,16 @@ the correction used to be merged into the stale row and lost. Exact repeats
 still merge metadata and raise salience to the requested floor. A regression
 test covers the correction case, and ADR-011 records the decision.
 
+### 2. Generic query subjects reach the graph
+
+`recall()` now builds graph seeds with `Consolidator.extract_query_entities()`,
+which keeps generic nouns such as `user` and `project`. The concept path
+(`extract_entities()`) still filters them for co-occurrence, the brief and
+active concepts. This fixes queries like "What does the user like?" returning
+no facts even though the graph stored `user --[like]--> coffee`. Regression
+tests cover the seed extraction and the end-to-end recall path, and ADR-014
+records the decision.
+
 ## Previous hardening session (2026-11-14)
 
 ### 1. Tests run in sandboxed Windows (`dca7990`)
@@ -138,13 +148,13 @@ suite on Python 3.10-3.12.
 
 - CI: `.github/workflows/tests.yml` runs the suite on Python 3.10-3.12;
   runtime deps are bounded in `pyproject.toml` and `requirements.txt`.
-- Tests: **86 passed** (`pytest -q`), including new coverage for exact-only
-  dedupe and near-duplicate corrections, orphan-vector pruning, re-add
-  durability, shared-edge deletion, provenance cascade on decay, a simulated
-  mid-pass consolidation crash, negation, lemmatized endpoints, coordinated
-  verbs, nested entities, fact deduplication/capping, the content index,
-  undirected `co_occurs`, decay node pruning, frozen presets, blank input,
-  truncation warnings and server path resolution.
+- Tests: **88 passed** (`pytest -q`), including new coverage for exact-only
+  dedupe, near-duplicate corrections and generic query subjects, orphan-vector
+  pruning, re-add durability, shared-edge deletion, provenance cascade on decay,
+  a simulated mid-pass consolidation crash, negation, lemmatized endpoints,
+  coordinated verbs, nested entities, fact deduplication/capping, the content
+  index, undirected `co_occurs`, decay node pruning, frozen presets, blank
+  input, truncation warnings and server path resolution.
 - Defaults: `max_distance=0.5`, `MAX_RECALL_FACTS=20`, negation-aware
   predicates, lemmatized triple endpoints, frozen `RecallWeights`.
 - `add(..., dedupe=False)` stores duplicates; `dedupe=True` merges only exact

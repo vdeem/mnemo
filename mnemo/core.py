@@ -233,10 +233,12 @@ class Mnemo:
         top_episodes = scored_episodes[:k]
 
         # Graph search (spreading activation) over entities in the query. The
-        # same edge is returned for each endpoint (and co_occurs is the noisy
-        # implicit mesh, not a fact), so merge by (source, relation, target)
-        # and keep the strongest copy.
-        query_entities = self.consolidator.extract_entities(query)
+        # query extractor keeps generic nouns such as "user" so a user-centric
+        # question can traverse the graph; concept extraction still filters
+        # them for co-occurrence and the brief. The same edge is returned for
+        # each endpoint (and co_occurs is the noisy implicit mesh, not a fact),
+        # so merge by (source, relation, target) and keep the strongest copy.
+        query_entities = self.consolidator.extract_query_entities(query)
         facts_by_key: dict[tuple[str, str, str], dict] = {}
         for entity in query_entities:
             for fact in self.db.get_graph_context(entity):

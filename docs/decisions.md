@@ -248,4 +248,28 @@ still applies. Consolidation still excludes generic nouns from entity nodes, so
 the triple writer is the only source of such nodes; its endpoint normalization
 is handled separately.
 
+## ADR-015 — incremental decay and proportional edge deletion
+
+**Decision:** `edges` stores `base_weight` (the undecayed contribution total)
+and `last_decay_at` (the decay anchor) alongside `weight` (the current decayed
+total). `decay_edges()` multiplies `weight` by
+`exp(-decay_rate * days since last_decay_at)` and advances the anchor.
+`delete_episodes()` subtracts the deleted episodes' hits from `base_weight` and
+removes the same share (`hits / base_weight`) of the current weight.
+
+**Why:** decay used to recompute from `last_reinforced` on every call without
+moving the anchor, so calling it twice in one day applied two full intervals
+and erased facts. Deletion subtracted raw hits from a weight that decay had
+already reduced, so deleting one source could drop a fact still supported by
+another source.
+
+**Consequences:** repeated decay in the same period is idempotent; daily decay
+matches one continuous curve; a shared edge survives deletion with a
+proportional lower weight. `last_reinforced` remains the recency stamp used by
+`get_recent_edges()`; `last_decay_at` is the decay anchor. Legacy edges are
+initialized with `base_weight = weight` and `last_decay_at = now`, so the
+migration does not decay an already-decayed value twice. Edges without
+provenance remain untouched by deletion. The archive keeps only the original
+edge columns and receives an explicit column list.
+
 

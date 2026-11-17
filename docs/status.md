@@ -36,6 +36,18 @@ no facts even though the graph stored `user --[like]--> coffee`. Regression
 tests cover the seed extraction and the end-to-end recall path, and ADR-014
 records the decision.
 
+### 3. Decay is incremental and deletion is proportional
+
+`edges` now keeps `base_weight` (undecayed contributions) and `last_decay_at`
+(the decay anchor) next to `weight`. `decay_edges()` applies only the time
+elapsed since the previous decay, so calling it twice in one day no longer
+compounds; `delete_episodes()` removes the deleted episodes' share of the
+current weight instead of subtracting raw hits from an already-decayed value.
+A shared fact therefore survives a delete with a proportionally lower weight.
+Legacy edges are initialized without double-decaying them. Regression tests
+cover decay-then-delete, repeated decay and the legacy-column migration;
+ADR-015 records the decision.
+
 ## Previous hardening session (2026-11-14)
 
 ### 1. Tests run in sandboxed Windows (`dca7990`)
@@ -148,20 +160,22 @@ suite on Python 3.10-3.12.
 
 - CI: `.github/workflows/tests.yml` runs the suite on Python 3.10-3.12;
   runtime deps are bounded in `pyproject.toml` and `requirements.txt`.
-- Tests: **88 passed** (`pytest -q`), including new coverage for exact-only
-  dedupe, near-duplicate corrections and generic query subjects, orphan-vector
-  pruning, re-add durability, shared-edge deletion, provenance cascade on decay,
-  a simulated mid-pass consolidation crash, negation, lemmatized endpoints,
-  coordinated verbs, nested entities, fact deduplication/capping, the content
-  index, undirected `co_occurs`, decay node pruning, frozen presets, blank
-  input, truncation warnings and server path resolution.
+- Tests: **91 passed** (`pytest -q`), including new coverage for exact-only
+  dedupe, near-duplicate corrections, generic query subjects, incremental
+  decay, proportional deletion after decay and the legacy decay-column
+  migration, orphan-vector pruning, re-add durability, shared-edge deletion,
+  provenance cascade on decay, a simulated mid-pass consolidation crash,
+  negation, lemmatized endpoints, coordinated verbs, nested entities, fact
+  deduplication/capping, the content index, undirected `co_occurs`, decay node
+  pruning, frozen presets, blank input, truncation warnings and server path
+  resolution.
 - Defaults: `max_distance=0.5`, `MAX_RECALL_FACTS=20`, negation-aware
   predicates, lemmatized triple endpoints, frozen `RecallWeights`.
 - `add(..., dedupe=False)` stores duplicates; `dedupe=True` merges only exact
   text, raises salience to the requested floor; near-duplicate corrections are
   stored as separate episodes; blank text raises `ValueError`.
-- Schema: `episodes` (+ `idx_episodes_content`), `nodes`, `edges`,
-  `edges_archive`, `episode_edges`.
+- Schema: `episodes` (+ `idx_episodes_content`), `nodes`, `edges`
+  (+ `base_weight`, `last_decay_at`), `edges_archive`, `episode_edges`.
 - Public Python API unchanged; MCP adds `delete_memory` and `decay_memory`.
   Schema additions are idempotent and additive.
 - Existing databases keep working. Facts extracted before `episode_edges`

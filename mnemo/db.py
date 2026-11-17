@@ -81,39 +81,45 @@ class Database:
             yield conn
 
     def decay_edges(self, decay_rate: float = 0.1, threshold: float = 0.05, archive: bool = True):
-        """
-        Reduces the weight of edges that haven’t been reinforced recently.
+        """Apply incremental decay to every edge.
+
+        Decay is anchored at ``edges.last_decay_at``, not at the last
+        reinforcement: each call only applies the time elapsed since the
+        previous decay, so calling it twice in one day does not compound.
+        ``edges.base_weight`` keeps the undecayed contribution total so that
+        deleting an episode can shrink a shared edge proportionally.
 
         :param decay_rate: Forgetting rate (fraction of weight lost per day).
-        :param threshold: The threshold below which an edge is considered “dead.”
+        :param threshold: The threshold below which an edge is considered "dead."
         :param archive: If True, edges are moved to the archive instead of being deleted.
         :return: The number of edges affected.
         """
         now = datetime.now(timezone.utc)
 
         with self._conn() as conn:
-            # Get all edges and their last_reinforced timestamps
-            cursor = conn.execute("SELECT id, weight, last_reinforced FROM edges")
-            edges = cursor.fetchall()
+            rows = conn.execute(
+                "SELECT id, weight, base_weight, last_decay_at FROM edges"
+            ).fetchall()
 
             affected = 0
-            for edge_id, weight, last_reinforced_str in edges:
-                # Parse the timestamp (SQLite stores it as a naive UTC string)
+            for edge_id, weight, base_weight, last_decay_at in rows:
+                current = float(weight or 0.0)
+                base = float(
+                    base_weight if base_weight is not None else current
+                )
                 try:
-                    last_reinforced = parse_utc(last_reinforced_str)
-                except (ValueError, TypeError):
-                    last_reinforced = now  # If parsing fails, assume it was reinforced just now
+                    anchor = parse_utc(last_decay_at) if last_decay_at else now
+                except (TypeError, ValueError):
+                    anchor = now
 
-                # Calculate how many days have passed
-                days_passed = (now - last_reinforced).total_seconds() / 86400.0
-
-                # Exponential decay: new_weight = weight * exp(-decay_rate * days)
-                new_weight = weight * math.exp(-decay_rate * days_passed)
+                days_passed = max(
+                    0.0, (now - anchor).total_seconds() / 86400.0
+                )
+                new_weight = current * math.exp(-decay_rate * days_passed)
 
                 if new_weight < threshold:
-                    # The edge has "died"
+                    # The edge has "died".
                     if archive:
-                        # Move it to the archive (create the table if it doesn't exist)
                         conn.execute("""
                             CREATE TABLE IF NOT EXISTS edges_archive (
                                 id TEXT PRIMARY KEY,
@@ -124,24 +130,30 @@ class Database:
                                 last_reinforced DATETIME
                             )
                         """)
-                        # Copy the edge to the archive
+                        # Explicit columns: edges has decay bookkeeping columns
+                        # that the archive does not need to keep.
                         conn.execute(
-                            "INSERT OR REPLACE INTO edges_archive SELECT * FROM edges WHERE id = ?",
-                            (edge_id,)
+                            "INSERT OR REPLACE INTO edges_archive "
+                            "(id, source_id, target_id, relation, weight, "
+                            "last_reinforced) "
+                            "SELECT id, source_id, target_id, relation, weight, "
+                            "last_reinforced FROM edges WHERE id = ?",
+                            (edge_id,),
                         )
-                    # Delete the edge from the main table
                     conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
                     affected += 1
-                else:
-                    # Just update the weight
-                    if abs(new_weight - weight) > 0.001:  # Update only if the change is significant
-                        conn.execute(
-                            "UPDATE edges SET weight = ? WHERE id = ?",
-                            (new_weight, edge_id)
-                        )
-                        affected += 1
+                    continue
 
-            
+                # Advance the anchor even when the visible change is tiny:
+                # otherwise a later call would decay the same interval again.
+                conn.execute(
+                    "UPDATE edges SET weight = ?, base_weight = ?, "
+                    "last_decay_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (new_weight, base, edge_id),
+                )
+                if abs(new_weight - current) > 0.001:
+                    affected += 1
+
             self._delete_orphan_nodes(conn, None)
             return affected
 
@@ -173,6 +185,12 @@ class Database:
                     relation TEXT NOT NULL DEFAULT 'co_occurs',
                     weight REAL DEFAULT 1.0,
                     last_reinforced DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    -- Undecayed contribution total; deletion shrinks weight
+                    -- proportionally instead of subtracting raw hits.
+                    base_weight REAL,
+                    -- Anchor for incremental decay. Separate from
+                    -- last_reinforced so repeated decay does not compound.
+                    last_decay_at DATETIME,
                     UNIQUE(source_id, target_id, relation)
                 );
                 -- Which episodes contributed to an edge, and how many times.
@@ -189,6 +207,18 @@ class Database:
             # keeps existing user databases usable without rewriting rows.
             _ensure_column(conn, "episodes", "consolidated_at", "DATETIME")
             _ensure_column(conn, "nodes", "display_name", "TEXT")
+            _ensure_column(conn, "edges", "base_weight", "REAL")
+            _ensure_column(conn, "edges", "last_decay_at", "DATETIME")
+            # Initialize only the new columns. Legacy edges may already hold
+            # decayed weights, so anchor them at migration time instead of
+            # decaying the same old interval again on the next pass.
+            conn.execute(
+                "UPDATE edges SET base_weight = weight WHERE base_weight IS NULL"
+            )
+            conn.execute(
+                "UPDATE edges SET last_decay_at = CURRENT_TIMESTAMP "
+                "WHERE last_decay_at IS NULL"
+            )
 
     def add_episode(self, content: str, metadata: dict = None, salience: float = 0.5,
                     dedupe: bool = True) -> str:
@@ -378,13 +408,19 @@ class Database:
         if row:
             edge_id = row[0]
             conn.execute(
-                "UPDATE edges SET weight = weight + 1.0, last_reinforced = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE edges SET weight = weight + 1.0, "
+                "base_weight = COALESCE(base_weight, weight) + 1.0, "
+                "last_reinforced = CURRENT_TIMESTAMP, "
+                "last_decay_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (edge_id,)
             )
         else:
             edge_id = str(uuid.uuid4())
             conn.execute(
-                "INSERT INTO edges (id, source_id, target_id, relation) VALUES (?, ?, ?, ?)",
+                "INSERT INTO edges "
+                "(id, source_id, target_id, relation, weight, base_weight, "
+                "last_decay_at) "
+                "VALUES (?, ?, ?, ?, 1.0, 1.0, CURRENT_TIMESTAMP)",
                 (edge_id, source_id, target_id, relation)
             )
         if episode_id is not None:
@@ -511,11 +547,12 @@ class Database:
     def delete_episodes(self, ids: list, orphan_grace_days: int = ORPHAN_NODE_GRACE_DAYS) -> int:
         """Remove episodes by id; the vector index is cleaned separately.
 
-        An edge's weight is the sum of the episodes that reinforced it, so
-        deleting an episode subtracts its recorded hits. Shared facts survive
-        with a lower weight; facts that existed only in the deleted episode
-        disappear. Edges created before ``episode_edges`` existed have no
-        provenance and are left untouched.
+        ``edges.weight`` is the decayed total and ``edges.base_weight`` the
+        undecayed contribution total. Deleting an episode subtracts its hits
+        from ``base_weight`` and removes the same share of the current weight,
+        so a shared fact survives with a proportional lower weight instead of
+        losing raw hits from an already-decayed value. Edges created before
+        ``episode_edges`` existed have no provenance and are left untouched.
 
         Consolidation creates nodes that no episode row owns, so deleting
         episodes can leave the graph holding concepts nothing points at any
@@ -542,13 +579,37 @@ class Database:
 
             if deleted:
                 for edge_id, hits in contributions:
+                    row = conn.execute(
+                        "SELECT weight, base_weight FROM edges WHERE id = ?",
+                        (edge_id,),
+                    ).fetchone()
+                    if row is None:
+                        continue
+                    weight, base_weight = row
+                    current = float(weight or 0.0)
+                    base = float(
+                        base_weight if base_weight is not None else current
+                    )
+                    removed = float(hits)
+                    if base <= 0.0 or current <= 0.0:
+                        conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
+                        continue
+                    remaining_base = base - removed
+                    if remaining_base <= 0.0:
+                        conn.execute("DELETE FROM edges WHERE id = ?", (edge_id,))
+                        continue
+                    # Keep the edge's current decay ratio: a shared fact
+                    # shrinks proportionally instead of losing raw hits.
+                    new_weight = current * (remaining_base / base)
                     conn.execute(
-                        "UPDATE edges SET weight = weight - ? WHERE id = ?",
-                        (float(hits), edge_id),
+                        "UPDATE edges SET weight = ?, base_weight = ? WHERE id = ?",
+                        (new_weight, remaining_base, edge_id),
                     )
                 # An edge whose weight came only from deleted episodes is no
                 # longer a fact; drop it (and any remaining provenance links).
-                conn.execute("DELETE FROM edges WHERE weight <= 0")
+                conn.execute(
+                    "DELETE FROM edges WHERE weight <= 0 OR base_weight <= 0"
+                )
                 self._delete_orphan_nodes(conn, orphan_grace_days)
             return deleted
 

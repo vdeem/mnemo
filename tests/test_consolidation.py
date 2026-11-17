@@ -31,7 +31,10 @@ def test_decay_archives_dead_edges(mnemo, tmp_db_path):
         datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=365)
     ).isoformat()
     with sqlite3.connect(tmp_db_path) as conn:
-        conn.execute("UPDATE edges SET last_reinforced = ?", (old,))
+        conn.execute(
+            "UPDATE edges SET last_reinforced = ?, last_decay_at = ?",
+            (old, old),
+        )
         conn.commit()
 
     assert mnemo.decay(decay_rate=0.1, threshold=0.05) > 0

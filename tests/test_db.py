@@ -1,5 +1,6 @@
 """Database-level unit tests."""
 
+import math
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -168,13 +169,106 @@ def test_decay_cascades_edge_provenance(db, tmp_db_path):
     db.reinforce_edge(alice, bob, relation="knows", episode_id=ep_id)
 
     with sqlite3.connect(tmp_db_path) as conn:
-        conn.execute("UPDATE edges SET last_reinforced = '2000-01-01 00:00:00'")
+        conn.execute(
+            "UPDATE edges SET last_reinforced = '2000-01-01 00:00:00', "
+            "last_decay_at = '2000-01-01 00:00:00'"
+        )
         conn.commit()
 
     assert db.decay_edges(0.1, 0.05) > 0
 
     with sqlite3.connect(tmp_db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM episode_edges").fetchone()[0] == 0
+
+
+def test_decay_then_delete_shrinks_shared_edge_proportionally(db, tmp_db_path):
+    """Deleting one source after decay must not erase a still-supported fact."""
+    first = db.add_episode("Alice knows Bob.")
+    second = db.add_episode("Alice still knows Bob.")
+    alice = db.get_or_create_node("alice")
+    bob = db.get_or_create_node("bob")
+    db.reinforce_edge(alice, bob, relation="knows", episode_id=first)
+    db.reinforce_edge(alice, bob, relation="knows", episode_id=second)
+
+    # One half-life of 10%/day decay: weight 2.0 -> 1.0.
+    old = (
+        datetime.now(timezone.utc).replace(tzinfo=None)
+        - timedelta(days=-math.log(0.5) / 0.1)
+    ).isoformat(sep=" ")
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.execute(
+            "UPDATE edges SET last_reinforced = ?, last_decay_at = ?",
+            (old, old),
+        )
+        conn.commit()
+
+    db.decay_edges(0.1, 0.05)
+    assert abs(db.get_graph_context("alice")[0]["weight"] - 1.0) < 0.01
+
+    db.delete_episodes([first])
+
+    remaining = db.get_graph_context("alice")
+    assert len(remaining) == 1
+    assert abs(remaining[0]["weight"] - 0.5) < 1e-6
+
+    db.delete_episodes([second])
+    assert db.get_graph_context("alice") == []
+
+
+def test_repeated_decay_does_not_compound(db, tmp_db_path):
+    ep_id = db.add_episode("Alice knows Bob.")
+    alice = db.get_or_create_node("alice")
+    bob = db.get_or_create_node("bob")
+    db.reinforce_edge(alice, bob, relation="knows", episode_id=ep_id)
+
+    old = (
+        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=10)
+    ).isoformat(sep=" ")
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.execute(
+            "UPDATE edges SET last_reinforced = ?, last_decay_at = ?",
+            (old, old),
+        )
+        conn.commit()
+
+    assert db.decay_edges(0.1, 0.0) >= 1
+    first = db.get_graph_context("alice")[0]["weight"]
+    assert abs(first - math.exp(-1.0)) < 0.01
+
+    db.decay_edges(0.1, 0.0)
+    second = db.get_graph_context("alice")[0]["weight"]
+
+    # A second immediate pass covers almost no additional time.
+    assert abs(second - first) < 1e-3
+
+
+def test_init_db_adds_decay_columns_to_legacy_edges(tmp_db_path):
+    with sqlite3.connect(tmp_db_path) as conn:
+        conn.execute(
+            "CREATE TABLE edges ("
+            "id TEXT PRIMARY KEY, source_id TEXT, target_id TEXT, "
+            "relation TEXT NOT NULL DEFAULT 'co_occurs', "
+            "weight REAL DEFAULT 1.0, "
+            "last_reinforced DATETIME DEFAULT CURRENT_TIMESTAMP, "
+            "UNIQUE(source_id, target_id, relation))"
+        )
+        conn.execute(
+            "INSERT INTO edges (id, source_id, target_id, relation, weight) "
+            "VALUES ('legacy', 'a', 'b', 'knows', 1.0)"
+        )
+        conn.commit()
+
+    Database(tmp_db_path)
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(edges)")}
+        row = conn.execute(
+            "SELECT base_weight, last_decay_at FROM edges WHERE id = 'legacy'"
+        ).fetchone()
+
+    assert {"base_weight", "last_decay_at"} <= columns
+    assert row[0] == 1.0
+    assert row[1] is not None
 
 
 def test_delete_episodes_does_not_orphan_nodes(db, tmp_db_path):
@@ -215,7 +309,10 @@ def test_decay_prunes_orphan_nodes(db, tmp_db_path):
     db.reinforce_edge(alice, bob, relation="knows", episode_id=ep_id)
 
     with sqlite3.connect(tmp_db_path) as conn:
-        conn.execute("UPDATE edges SET last_reinforced = '2000-01-01 00:00:00'")
+        conn.execute(
+            "UPDATE edges SET last_reinforced = '2000-01-01 00:00:00', "
+            "last_decay_at = '2000-01-01 00:00:00'"
+        )
         conn.commit()
 
     assert db.decay_edges(0.1, 0.05) > 0

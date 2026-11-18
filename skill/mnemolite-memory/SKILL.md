@@ -15,7 +15,7 @@ allowed-tools: add_memory recall_memory consolidate_memory delete_memory decay_m
 metadata:
   author: vdeem
   version: "0.1.0"
-  homepage: https://github.com/vdeem/mnemo
+  homepage: https://github.com/vdeem/mnemolite
 ---
 
 # Mnemolite Local Memory

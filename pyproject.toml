@@ -38,10 +38,10 @@ build = ["build>=1,<2", "twine>=5,<7", "wheel>=0.42,<1"]
 mnemolite-server = "mnemolite.server:main"
 
 [project.urls]
-Homepage = "https://github.com/vdeem/mnemo"
-Repository = "https://github.com/vdeem/mnemo"
-Documentation = "https://github.com/vdeem/mnemo/tree/main/docs"
-Issues = "https://github.com/vdeem/mnemo/issues"
+Homepage = "https://github.com/vdeem/mnemolite"
+Repository = "https://github.com/vdeem/mnemolite"
+Documentation = "https://github.com/vdeem/mnemolite/tree/main/docs"
+Issues = "https://github.com/vdeem/mnemolite/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

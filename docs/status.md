@@ -1,6 +1,6 @@
 # Mnemo status and roadmap
 
-_Last updated: 2026-11-17._
+_Last updated: 2026-11-18._
 
 ## What Mnemo is
 
@@ -68,6 +68,18 @@ except the canonical self node `user`; a triple with an invalid endpoint is
 skipped. Regression tests cover entity-span endpoints, pronoun rejection,
 generic-object rejection and end-to-end node hygiene; ADR-017 records the
 decision.
+
+### 6. Distribution and Agent Skills packaging
+
+The distribution is now `mnemo-local-memory`; the import package and the
+`mnemo-server` console script keep their names. The bare `mnemo` distribution
+name is already used by an unrelated package. `pyproject.toml` carries modern
+license metadata, classifiers, keywords and project URLs. The skill source is
+tracked under `skill/`, `docs/skill.md` defines the packaging contract,
+`SKILL.md` uses the space-separated `allowed-tools` string, and
+`mcp_config.json` launches `mnemo-server` instead of a hard-coded local path.
+Packaging tests validate the frontmatter, the MCP config and the archive;
+ADR-018 records the decision.
 
 ## Previous hardening session (2026-11-14)
 
@@ -181,17 +193,17 @@ suite on Python 3.10-3.12.
 
 - CI: `.github/workflows/tests.yml` runs the suite on Python 3.10-3.12;
   runtime deps are bounded in `pyproject.toml` and `requirements.txt`.
-- Tests: **99 passed** (`pytest -q`), including new coverage for exact-only
+- Tests: **103 passed** (`pytest -q`), including new coverage for exact-only
   dedupe, near-duplicate corrections, generic query subjects, incremental
   decay, proportional deletion after decay, the legacy decay-column migration,
   typed facts independent of the vector cutoff, relation filtering before the
   graph LIMIT, normalized triple endpoints, pronoun/generic node rejection,
-  orphan-vector pruning, re-add durability, shared-edge deletion, provenance
-  cascade on decay, a simulated mid-pass consolidation crash, negation,
-  lemmatized endpoints, coordinated verbs, nested entities, fact
-  deduplication/capping, the content index, undirected `co_occurs`, decay node
-  pruning, frozen presets, blank input, truncation warnings and server path
-  resolution.
+  skill frontmatter/config/archive packaging, orphan-vector pruning, re-add
+  durability, shared-edge deletion, provenance cascade on decay, a simulated
+  mid-pass consolidation crash, negation, lemmatized endpoints, coordinated
+  verbs, nested entities, fact deduplication/capping, the content index,
+  undirected `co_occurs`, decay node pruning, frozen presets, blank input,
+  truncation warnings and server path resolution.
 - Defaults: `max_distance=0.5`, `MAX_RECALL_FACTS=20`, negation-aware
   predicates, lemmatized triple endpoints, frozen `RecallWeights`.
 - `add(..., dedupe=False)` stores duplicates; `dedupe=True` merges only exact
@@ -201,6 +213,10 @@ suite on Python 3.10-3.12.
   (+ `base_weight`, `last_decay_at`), `edges_archive`, `episode_edges`.
 - Public Python API unchanged; MCP adds `delete_memory` and `decay_memory`.
   Schema additions are idempotent and additive.
+- Distribution: `mnemo-local-memory`; import package `mnemo`; console script
+  `mnemo-server`.
+- Skill: `skill/mnemo-local-memory/` plus the upload-ready
+  `skill/mnemo-local-memory.zip`; contract in `docs/skill.md`.
 - Existing databases keep working. Facts extracted before `episode_edges`
   existed cannot be attributed to an episode, so deleting old episodes does not
   remove those legacy edges.
@@ -212,6 +228,7 @@ pip install -e ".[dev]"
 .\venv\Scripts\python.exe -m pytest -q
 python test_mcp_client.py   # hermetic; needs unrestricted process/pipe creation
 python -m mnemo.server      # or: mnemo-server
+python -m build             # wheel + sdist into dist/
 ```
 
 The MCP store is controlled by `MNEMO_DATA_DIR`, `MNEMO_DB_PATH` and
@@ -226,8 +243,8 @@ forces it.
 - spaCy sometimes tags coordinated verbs as nouns ("Alice sings and dances."),
   so the coordination logic cannot fire. This is a tagger ambiguity, not a
   graph bug.
-- Triple endpoints are token-level, so a multiword subject loses modifiers
-  ("New York" -> "york" in a triple) and coreference is not resolved.
+- Non-NER multiword noun phrases can still lose modifiers at the token level;
+  NER spans are mapped correctly, and pronouns are skipped.
 - Negation only reads the `neg` dependency; `no` (determiner) and `never`
   (adverb) are not marked.
 
@@ -237,6 +254,8 @@ forces it.
   multiple vectors instead of only warning.
 - Add lint, typing and coverage steps to CI (it currently runs tests only).
 
-### P3 — packaging and docs
+### P3 — release operations
 
-- `docs/skill.md` is still missing.
+- Publish `mnemo-local-memory` to the package index and tag the release.
+- Add signed release artifacts or checksums if the distribution channel
+  requires them.

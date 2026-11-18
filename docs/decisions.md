@@ -310,4 +310,24 @@ are dropped instead of creating junk edges; generic objects such as `project`
 are dropped until a more specific extraction rule exists. Legacy graphs keep
 nodes created before this change; new consolidation does not add them.
 
+## ADR-018 — distribution name and Agent Skills bundle
+
+**Decision:** publish the Python distribution as `mnemo-local-memory` while
+keeping the import package `mnemo` and the console script `mnemo-server`.
+Track `skill/mnemo-local-memory/` and its upload archive, describe the
+packaging contract in `docs/skill.md`, and validate the frontmatter, MCP config
+and archive in `tests/test_skill.py`.
+
+**Why:** the bare `mnemo` distribution name belongs to an unrelated project on
+the package index, so `pip install mnemo` cannot be this project. Renaming the
+import package would break existing Python callers; only the distribution name
+needs to change. The skill bundle also had a YAML list for `allowed-tools`, a
+hard-coded author path in `mcp_config.json`, and no packaging tests.
+
+**Consequences:** installation instructions use `mnemo-local-memory`; existing
+imports (`from mnemo import Mnemo`) and `python -m mnemo.server` keep working.
+The skill source is tracked in git and the ZIP is rebuilt from it. The
+frontmatter uses the space-separated `allowed-tools` form, and the MCP config
+launches `mnemo-server` with a portable data directory.
+
 

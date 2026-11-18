@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mnemo": {
+      "command": "mnemo-server",
+      "args": [],
+      "env": {
+        "MNEMO_DATA_DIR": "~/.mnemo"
+      }
+    }
+  }
+}

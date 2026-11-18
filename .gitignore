@@ -45,3 +45,4 @@ test_chroma_triples
 !AGENTS.md
 !docs/*.md
 !docs/**/*.md
+!skill/**/*.md

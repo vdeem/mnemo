@@ -19,6 +19,8 @@
 - **Run a single test file:** `pytest -q tests/test_extraction.py`
 - **Windows/sandboxed temp:** if `%TEMP%` is not writable, `tests/conftest.py` moves pytest's temp root to `.pytest_tmp/` (gitignored); force it with `pytest -q --basetemp=.pytest_tmp`.
 - **Start MCP server (stdio):** `python -m mnemo.server` or `mnemo-server`
+- **Build distributions:** `python -m build` (wheel and sdist in `dist/`)
+- **Rebuild the skill archive:** see `docs/skill.md` (PowerShell and POSIX commands)
 - **End-to-end MCP smoke test:** `python test_mcp_client.py` (spawns the server as a subprocess, so it needs unrestricted process/pipe creation)
 - **MCP store location:** `MNEMO_DATA_DIR`, `MNEMO_DB_PATH`, `MNEMO_CHROMA_PATH` (defaults: checkout root or `~/.mnemo`).
 - **MCP protocol/security check (before any release):** `mcpdoctor`
@@ -41,7 +43,12 @@ _constants.py # shared constants (GENERIC_NOUNS, SELF_NOUNS)
 server.py # lifespan-scoped MCP (MCPServer) tools — thin wrappers, no business logic
 tests/ # pytest suite (preferred location)
 docs/ # public long-form docs referenced from this file
+skill/ # Agent Skills package source and upload archive
 test_mcp_client.py # end-to-end MCP smoke test (repo root)
+
+**Distribution name:** the published distribution is `mnemo-local-memory`; the
+import package and console script stay `mnemo` / `mnemo-server`. Do not rename
+the import package without a migration and a `docs/decisions.md` note.
 
 **Do not modify / enter:**
 - `*.db`, `*.db-wal`, `*.db-shm` — runtime data.
@@ -110,6 +117,7 @@ session start. It is a projection of SQLite, never a second source of truth.
   - `tests/test_recall.py` — similarity-driven recall, `max_distance` default and override, `RecallWeights` presets/env precedence and frozen instances, duplicate add/upsert, `dedupe=False`, metadata/salience merge, startup reindex, orphan-vector pruning, facts independent of the vector cutoff, fact deduplication/capping, blank input and truncation warnings.
   - `tests/test_brief.py` — Markdown brief rendering: empty graph, typed triples only, deterministic bytes, write-on-consolidate and skip-on-no-op.
   - `tests/test_server.py` — MCP data-dir/env resolution and tool registration (no model load).
+  - `tests/test_skill.py` — skill frontmatter contract, MCP client config and archive contents (no model load).
 - `test_mcp_client.py` at the repo root is an **end-to-end MCP smoke test**, not a unit test. Run it manually before releases; do not add it to `tests/`.
 - `test_new.py` and `test_mnemo.py` were removed; their scenarios now live in `tests/` above. Do not recreate them at the repo root.
 - Minimum coverage before any release:
@@ -126,6 +134,7 @@ session start. It is a projection of SQLite, never a second source of truth.
   - `recall` returns non-empty for an exact-match query and honours `max_distance`.
   - `RecallWeights` presets actually change ranking (`balanced` vs `emotional`), and env/explicit precedence holds.
   - The agent brief excludes `co_occurs`, is deterministic, and is not rewritten by a no-op consolidation.
+  - The skill frontmatter, MCP client config and upload archive pass `tests/test_skill.py`.
 - `pytest` is configured with `testpaths = ["tests"]`; the root `test_mcp_client.py` is run manually.
 - CI: `.github/workflows/tests.yml` installs `.[dev]`, downloads the spaCy model and runs the suite on Python 3.10-3.12.
 - Run `pytest -q` and `python test_mcp_client.py` before declaring a task done.
@@ -136,7 +145,7 @@ Read on demand, not upfront:
 - `docs/status.md` — current status, what changed, known limitations, roadmap.
 - `docs/decisions.md` — ADRs (why SQLite, why zero-LLM, why Chroma, why multilingual-e5-small, vector reconciliation, edge provenance, transactional marking, dedupe semantics, MCP lifespan/data dir, graph lifecycle).
 - `docs/extraction.md` — entity/triple extraction rules, stop-list (`GENERIC_NOUNS`), negation conventions, and known spaCy failure modes.
-- `docs/skill.md` — SKILL.md packaging contract for Agensi / MCP marketplaces. *(Planned for Phase 3; create a stub when packaging begins.)*
+- `docs/skill.md` — Agent Skills packaging contract, install path, validation and release checklist for the `skill/` bundle.
 
 ## When you finish a task
 

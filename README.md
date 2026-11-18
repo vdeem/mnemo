@@ -28,16 +28,16 @@ Mnemo takes a different approach: **cognitive consolidation**. It uses local NLP
 ## Installation
 
 ```bash
-pip install -r requirements.txt
+pip install mnemo-local-memory
 ```
 
-For development (includes `pytest`):
+From a checkout:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-The spaCy pipeline (`en_core_web_sm`) and the embedding model (`intfloat/multilingual-e5-small`) download automatically on first run.
+The spaCy pipeline (`en_core_web_sm`) and the embedding model (`intfloat/multilingual-e5-small`) download automatically on first run. The first start therefore needs network access and enough disk space for the model cache.
 
 ## Quick Start
 
@@ -85,6 +85,18 @@ or `~/.mnemo`; override it with `MNEMO_DATA_DIR`, `MNEMO_DB_PATH` or
 `MNEMO_CHROMA_PATH`. This keeps the memory location independent of the
 directory the MCP client launches the server from.
 
+## Agent skill
+
+`skill/mnemo-local-memory/` is a self-contained Agent Skills package that
+teaches an agent when and how to call the Mnemo MCP tools. The upload-ready
+archive is `skill/mnemo-local-memory.zip`; it contains `SKILL.md`, references,
+examples, an MCP client configuration and a connectivity check.
+
+- Packaging contract and release checklist: [docs/skill.md](docs/skill.md).
+- The skill requires the `mnemo-local-memory` package (or an editable checkout)
+  and a running `mnemo-server` over stdio.
+- No external LLM API is called by the server or the skill.
+
 ## How it works
 
 1. **Episodic Memory** — Raw texts are embedded with `intfloat/multilingual-e5-small` and stored in ChromaDB.
@@ -104,6 +116,7 @@ directory the MCP client launches the server from.
 - [x] Reliability hardening and negation-aware extraction
 - [x] MCP server hardening and graph lifecycle
 - [x] Packaging, CI and hermetic MCP smoke
+- [x] Agent skill package and installable distribution
 - [ ] Phase 2b — RAG adapters
 
 See [docs/status.md](docs/status.md) for the current status, recent changes and the detailed roadmap, and [docs/extraction.md](docs/extraction.md) for the extraction rules.

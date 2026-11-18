@@ -290,4 +290,24 @@ remain deduplicated, weight-sorted and capped at `MAX_RECALL_FACTS`.
 need `co_occurs`; only recall opts into the typed view. The agent brief is
 unchanged because it already filters `co_occurs` through its own queries.
 
+## ADR-017 — triple endpoints share the entity graph keys
+
+**Decision:** every triple endpoint is normalized with the same key function as
+entity nodes: possessives and trailing periods are stripped, noun lemmas are
+used, and a token inside a named-entity span takes the span's key. Pronouns and
+`GENERIC_NOUNS` are dropped, except the canonical self noun `user`
+(`SELF_NOUNS`). A triple with an invalid endpoint is skipped as a whole.
+
+**Why:** token-level endpoints created duplicate junk nodes: `Acme Corp.`
+produced `corp.` next to the entity `acme corp`, `New York` produced `york`,
+and `It is a dog` / `She is a doctor` created `it` / `she` nodes that polluted
+graph traversal. The self node must survive the generic filter because memories
+are written about the user and recall now seeds the graph with `user` (ADR-014).
+
+**Consequences:** typed facts point at the same nodes as entity mentions, so
+`work at Acme Corp.` yields `user --[work]--> acme corp`; pronoun-only claims
+are dropped instead of creating junk edges; generic objects such as `project`
+are dropped until a more specific extraction rule exists. Legacy graphs keep
+nodes created before this change; new consolidation does not add them.
+
 

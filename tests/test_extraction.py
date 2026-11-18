@@ -117,3 +117,24 @@ def test_entity_trailing_period_does_not_fork_the_node(consolidator):
 
     assert with_period == without_period
     assert "acme corp" in with_period
+
+
+def test_triple_endpoint_uses_named_entity_span(consolidator):
+    """Token-level endpoints follow the entity span, not a truncated token."""
+    assert ("user", "work", "acme corp") in consolidator.extract_triples(
+        "The user works at Acme Corp."
+    )
+    assert ("alice", "like", "new york") in consolidator.extract_triples(
+        "Alice likes New York."
+    )
+
+
+def test_triple_pronoun_endpoints_are_dropped(consolidator):
+    assert consolidator.extract_triples("It is a dog. She is a doctor.") == []
+
+
+def test_triple_generic_endpoints_are_dropped_except_user(consolidator):
+    assert consolidator.extract_triples("The user has a project.") == []
+    assert ("user", "like", "coffee") in consolidator.extract_triples(
+        "The user likes coffee."
+    )

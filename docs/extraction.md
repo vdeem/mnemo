@@ -25,7 +25,9 @@ Both are normalized to a graph key:
 Filtering:
 
 - Pronouns are skipped (a noun chunk rooted in `PRON` is not a concept).
-- `GENERIC_NOUNS` (`thing`, `user`, `project`, ...) are skipped.
+- `GENERIC_NOUNS` (`thing`, `user`, `project`, ...) are skipped for concepts,
+  co-occurrence and the brief. Triples keep only the canonical self noun
+  `user` (`SELF_NOUNS`), because memories are written about that node.
 - Lemmas of two characters or fewer and spaCy stop words are skipped.
 - A noun chunk whose head token sits inside an NER span is skipped:
   `York` in `New York` and `Corp` in `Acme Corp.` are not separate concepts.
@@ -39,6 +41,11 @@ lemmas on every position.
   (`sings and dances`) inherits the subject of its head verb.
 - **Object** — `dobj` / `pobj`, including a `pobj` under a `prep` child
   (`work at Google`).
+- **Endpoints** — a named-entity span wins over the token: `Acme Corp.` becomes
+  `acme corp`, not `corp.`, and `New York` becomes `new york`, not `york`.
+  Possessives and trailing periods are stripped by the same key normalizer as
+  entity nodes. Pronouns and `GENERIC_NOUNS` are dropped, except the canonical
+  self node `user`.
 - **Transitive** — `(subject, verb_lemma, object)`.
 - **Intransitive** — `(subject, "did", verb_phrase)`. Particles are joined to
   the verb (`pass away` -> `pass_away`).
@@ -67,14 +74,17 @@ high-confidence layer.
 - **POS ambiguity.** spaCy sometimes tags coordinated verbs as nouns:
   `Alice sings and dances.` becomes `sings`/`dances` NOUN, so no verb triple is
   produced despite the coordination logic. Tests use unambiguous verbs.
-- **Token-level endpoints.** A multiword subject loses its modifiers;
-  `New York is big` can produce a `york` endpoint even though the entity node
-  is `new york`.
-- **No coreference.** Pronouns are not resolved; `She met Bob` yields a `she`
-  endpoint instead of linking to the earlier person.
+- **Non-NER multiword endpoints.** NER spans map to their full entity key, but
+  a multiword noun phrase without an NER label can still lose modifiers at the
+  token level. `red car` yields `car`; `New York` is handled because it is a
+  GPE span.
+- **No coreference.** Pronouns are not resolved and are now dropped as triple
+  endpoints. `She met Bob` yields no `she` edge, so the fact may be lost rather
+  than linked to the earlier person.
 - **Negation scope.** Only the `neg` dependency is detected. `no` as a
   determiner and `never` as an adverb are not marked yet.
 - **Passives.** `Bob was fired` uses `nsubjpass` with no object and becomes an
   intransitive `bob/did/fire`; the agent is not represented.
-- **Multiword NER vs token triples.** The NER node key can differ from a
-  token-level triple endpoint for the same mention; the graph may hold both.
+- **Legacy graphs.** Facts consolidated before endpoint normalization may still
+  hold truncated nodes (`corp.`, `york`) or pronoun nodes (`it`, `she`). New
+  consolidation does not create them; old rows are not rewritten.

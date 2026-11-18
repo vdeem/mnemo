@@ -17,3 +17,7 @@ GENERIC_NOUNS = {
     "something",
     "nothing",
 }
+
+# The memory is almost always about the user, so triples keep this one generic
+# noun as the canonical self node even though concepts and the brief exclude it.
+SELF_NOUNS = {"user"}

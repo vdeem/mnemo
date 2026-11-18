@@ -58,6 +58,17 @@ tests cover relation filtering before the limit, facts with an empty vector
 index, facts when all episodes miss the cutoff, and facts alongside a large
 co-occurrence mesh; ADR-016 records the decision.
 
+### 5. Triple endpoints share entity keys and skip junk nodes
+
+Triple subjects and objects now use the same normalized keys as entity nodes:
+possessives and trailing periods are stripped, noun lemmas are used, and a
+token inside a named-entity span takes the span's key (`Acme Corp.` ->
+`acme corp`, `New York` -> `new york`). Pronouns and generic nouns are dropped,
+except the canonical self node `user`; a triple with an invalid endpoint is
+skipped. Regression tests cover entity-span endpoints, pronoun rejection,
+generic-object rejection and end-to-end node hygiene; ADR-017 records the
+decision.
+
 ## Previous hardening session (2026-11-14)
 
 ### 1. Tests run in sandboxed Windows (`dca7990`)
@@ -170,13 +181,14 @@ suite on Python 3.10-3.12.
 
 - CI: `.github/workflows/tests.yml` runs the suite on Python 3.10-3.12;
   runtime deps are bounded in `pyproject.toml` and `requirements.txt`.
-- Tests: **95 passed** (`pytest -q`), including new coverage for exact-only
+- Tests: **99 passed** (`pytest -q`), including new coverage for exact-only
   dedupe, near-duplicate corrections, generic query subjects, incremental
   decay, proportional deletion after decay, the legacy decay-column migration,
   typed facts independent of the vector cutoff, relation filtering before the
-  graph LIMIT, orphan-vector pruning, re-add durability, shared-edge deletion,
-  provenance cascade on decay, a simulated mid-pass consolidation crash,
-  negation, lemmatized endpoints, coordinated verbs, nested entities, fact
+  graph LIMIT, normalized triple endpoints, pronoun/generic node rejection,
+  orphan-vector pruning, re-add durability, shared-edge deletion, provenance
+  cascade on decay, a simulated mid-pass consolidation crash, negation,
+  lemmatized endpoints, coordinated verbs, nested entities, fact
   deduplication/capping, the content index, undirected `co_occurs`, decay node
   pruning, frozen presets, blank input, truncation warnings and server path
   resolution.

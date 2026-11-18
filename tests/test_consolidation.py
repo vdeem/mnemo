@@ -184,3 +184,13 @@ def test_cooccurrence_is_sentence_scoped(mnemo, tmp_db_path):
         frozenset(("cleo", "dan")),
         frozenset(("eve", "finn")),
     }
+
+
+def test_consolidation_skips_pronoun_and_generic_triple_nodes(mnemo, tmp_db_path):
+    mnemo.add("It is a dog. She is a doctor. The user has a project.")
+    mnemo.consolidate(write_brief=False)
+
+    with sqlite3.connect(tmp_db_path) as conn:
+        names = {row[0] for row in conn.execute("SELECT name FROM nodes")}
+
+    assert names == {"dog", "doctor"}

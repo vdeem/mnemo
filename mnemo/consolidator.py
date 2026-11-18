@@ -13,7 +13,7 @@ import spacy
 from spacy.cli import download as spacy_download
 from spacy.tokens import Token
 
-from ._constants import GENERIC_NOUNS
+from ._constants import GENERIC_NOUNS, SELF_NOUNS
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +32,11 @@ _POSSESSIVE = re.compile(r"(?:['’]s|['’])$")
 
 def _strip_possessive(text: str) -> str:
     return _POSSESSIVE.sub("", text.strip()).strip()
+
+
+def _normalize_key(text: str) -> str:
+    """Canonical graph key: no possessive, lowercase, no trailing period."""
+    return _strip_possessive(text).lower().strip().rstrip(".").strip()
 
 
 class Consolidator:
@@ -93,7 +98,7 @@ class Consolidator:
             # NER often swallows the sentence-final period ("Acme Corp.").
             # The display keeps it, but the graph key must match the version
             # without it ("Acme Corp is hiring").
-            key = (name or display).lower().strip().rstrip(".").strip()
+            key = _normalize_key(name or display)
             if not key or (not include_generic and key in GENERIC_NOUNS):
                 return
             if key not in mentions:
@@ -170,8 +175,38 @@ class Consolidator:
                         return p_child
         return None
 
+    @staticmethod
+    def _endpoint_key(token: Token, span_keys: dict[int, str]) -> str | None:
+        """Graph key for a triple endpoint, or None if it is not a concept.
+
+        A named-entity span wins over the token so "Acme Corp." maps to
+        "acme corp" and "New York" to "new york". Pronouns and generic nouns
+        are dropped, except the canonical self node "user".
+        """
+        if token.pos_ == "PRON":
+            return None
+        key = span_keys.get(token.i)
+        if key is None:
+            key = _normalize_key(token.lemma_ or token.text)
+        if not key or (key in GENERIC_NOUNS and key not in SELF_NOUNS):
+            return None
+        return key
+
     def _triples(self, doc) -> list[tuple[str, str, str]]:
         triples: list[tuple[str, str, str]] = []
+
+        # Map every token inside a named entity to the span's graph key. This
+        # keeps a token-level endpoint ("Corp." in "Acme Corp.") aligned with
+        # the entity node instead of creating a second, truncated node.
+        span_keys: dict[int, str] = {}
+        for ent in doc.ents:
+            if ent.label_ not in ENTITY_LABELS:
+                continue
+            key = _normalize_key(ent.text)
+            if not key:
+                continue
+            for ent_token in ent:
+                span_keys[ent_token.i] = key
 
         for token in doc:
             # 1. Subject-Copula-Complement (Jack is a dog). "is" is AUX in
@@ -183,8 +218,13 @@ class Consolidator:
                     None,
                 )
                 if subj is not None and comp is not None:
-                    relation = "is_not_a" if self._is_negated(token) else "is_a"
-                    triples.append((self._lemma(subj), relation, self._lemma(comp)))
+                    subj_key = self._endpoint_key(subj, span_keys)
+                    comp_key = self._endpoint_key(comp, span_keys)
+                    if subj_key is not None and comp_key is not None:
+                        relation = (
+                            "is_not_a" if self._is_negated(token) else "is_a"
+                        )
+                        triples.append((subj_key, relation, comp_key))
                 continue
 
             if token.pos_ != "VERB":
@@ -199,13 +239,20 @@ class Consolidator:
 
             if obj is not None:
                 # 2. Subject-Verb-Object (user won lottery).
-                predicate = ("not_" if negated else "") + self._lemma(token)
-                triples.append((self._lemma(subj), predicate, self._lemma(obj)))
+                subj_key = self._endpoint_key(subj, span_keys)
+                obj_key = self._endpoint_key(obj, span_keys)
+                if subj_key is not None and obj_key is not None:
+                    predicate = ("not_" if negated else "") + self._lemma(token)
+                    triples.append((subj_key, predicate, obj_key))
                 continue
 
             # A clausal complement carries the actual fact: "I think Bob likes
             # tea" should yield Bob/like/tea, not I/did/think.
             if any(child.dep_ in ("ccomp", "xcomp") for child in token.children):
+                continue
+
+            subj_key = self._endpoint_key(subj, span_keys)
+            if subj_key is None:
                 continue
 
             # 3. Intransitive verb: Subject + Verb (no object). Keep particles
@@ -216,14 +263,15 @@ class Consolidator:
                     verb_phrase = f"{verb_phrase}_{self._lemma(child)}"
             if negated:
                 verb_phrase = f"not_{verb_phrase}"
-            triples.append((self._lemma(subj), "did", verb_phrase))
+            triples.append((subj_key, "did", verb_phrase))
 
         # 4. Possessions (User's dog).
         for token in doc:
             if token.dep_ == "poss":
-                triples.append(
-                    (self._lemma(token), "has_a", self._lemma(token.head))
-                )
+                owner_key = self._endpoint_key(token, span_keys)
+                thing_key = self._endpoint_key(token.head, span_keys)
+                if owner_key is not None and thing_key is not None:
+                    triples.append((owner_key, "has_a", thing_key))
 
         return list(set(triples))  # Remove duplicates
 

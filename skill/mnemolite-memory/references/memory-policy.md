@@ -94,7 +94,7 @@ Keep metadata small. It is merged on repeat adds; new keys win.
 
 ## Privacy and security
 
-- Mnemo stores everything locally in SQLite/ChromaDB; no external LLM API is
+- Mnemolite stores everything locally in SQLite/ChromaDB; no external LLM API is
   called.
 - Local does not mean harmless: other local tools and agents may read the
   store. Do not store secrets without explicit consent.

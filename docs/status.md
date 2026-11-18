@@ -1,10 +1,10 @@
-# Mnemo status and roadmap
+# Mnemolite status and roadmap
 
 _Last updated: 2026-11-18._
 
-## What Mnemo is
+## What Mnemolite is
 
-Mnemo is a local-first, zero-LLM-API memory engine for AI agents. It keeps two
+Mnemolite is a local-first, zero-LLM-API memory engine for AI agents. It keeps two
 stores and joins them at recall time:
 
 - **Episodic memory** — raw texts and e5 embeddings in ChromaDB.
@@ -71,15 +71,15 @@ decision.
 
 ### 6. Distribution and Agent Skills packaging
 
-The distribution is now `mnemo-local-memory`; the import package and the
-`mnemo-server` console script keep their names. The bare `mnemo` distribution
-name is already used by an unrelated package. `pyproject.toml` carries modern
-license metadata, classifiers, keywords and project URLs. The skill source is
-tracked under `skill/`, `docs/skill.md` defines the packaging contract,
-`SKILL.md` uses the space-separated `allowed-tools` string, and
-`mcp_config.json` launches `mnemo-server` instead of a hard-coded local path.
-Packaging tests validate the frontmatter, the MCP config and the archive;
-ADR-018 records the decision.
+The distribution is now `mnemolite`; the import package and the
+`mnemolite-server` console script use the same name. The previously considered
+short package name is already used by an unrelated package. `pyproject.toml`
+carries modern license metadata, classifiers, keywords and project URLs. The
+skill source is tracked under `skill/`, `docs/skill.md` defines the packaging
+contract, `SKILL.md` uses the space-separated `allowed-tools` string, and
+`mcp_config.json` launches `mnemolite-server` instead of a hard-coded local
+path. Packaging tests validate the frontmatter, the MCP config and a
+reproducibly built archive; ADR-018 records the decision.
 
 ## Previous hardening session (2026-11-14)
 
@@ -94,7 +94,7 @@ fine. `*.db-wal` and `*.db-shm` are ignored as well.
 ### 2. Orphan vectors no longer become memories (`5c75d73`)
 
 Previously `recall()` trusted Chroma ids and defaulted missing SQLite rows to
-`{}`, so a vector left behind by a crash (or by a wiped `mnemo.db`) was served
+`{}`, so a vector left behind by a crash (or by a wiped `mnemolite.db`) was served
 as a memory. Re-adding that text hit the dedupe path, reinforced a non-existent
 row and returned its id without inserting anything.
 
@@ -143,7 +143,7 @@ failure modes live in [extraction.md](extraction.md).
 `facts` excludes `co_occurs`, merges duplicates by
 `(source, relation, target)`, keeps the strongest copy, sorts by weight and is
 capped at `MAX_RECALL_FACTS` (20). The default `max_distance` dropped from 1.0
-to 0.5 (cosine >= 0.75); widen it per call or with `MNEMO_MAX_DISTANCE`.
+to 0.5 (cosine >= 0.75); widen it per call or with `MNEMOLITE_MAX_DISTANCE`.
 
 ### 7. Dedupe semantics (`db5423d`)
 
@@ -153,10 +153,10 @@ is clamped to 0..1 on the way in.
 
 ### 8. MCP server hardening (`ed9b3a8`)
 
-The server no longer opens Mnemo at import time and no longer resolves
-`mnemo_mcp.db` relative to the launch CWD. `MNEMO_DATA_DIR`,
-`MNEMO_DB_PATH` and `MNEMO_CHROMA_PATH` control the store; defaults are the
-checkout root (when `pyproject.toml` is present) or `~/.mnemo`. The store is
+The server no longer opens Mnemolite at import time and no longer resolves
+`mnemolite_mcp.db` relative to the launch CWD. `MNEMOLITE_DATA_DIR`,
+`MNEMOLITE_DB_PATH` and `MNEMOLITE_CHROMA_PATH` control the store; defaults are the
+checkout root (when `pyproject.toml` is present) or `~/.mnemolite`. The store is
 opened in an `MCPServer` lifespan and closed on shutdown. Tools raise
 `ToolError` instead of returning `"Error: ..."` strings, blocking calls run in
 a worker thread, `add_memory` accepts `salience`/`dedupe`, `recall_memory`
@@ -178,14 +178,14 @@ model token limit because only the first tokens are searchable.
 
 ### 11. Packaging, CI and hermetic smoke (`ca150c6`, `daec30a`)
 
-`test_mcp_client.py` now runs against a temporary `MNEMO_DATA_DIR`, asserts the
+`test_mcp_client.py` now runs against a temporary `MNEMOLITE_DATA_DIR`, asserts the
 full add/consolidate/recall/delete/decay cycle (and a `ToolError` for blank
 input), and points the child `TEMP`/`TMP` at the workspace data dir so Chroma
 can create its SQLite store under a restricted token.
 
 Runtime dependencies carry major-version bounds in both `pyproject.toml` and
 `requirements.txt`; `anyio` is declared directly (the server imports it) and
-`pytest` moved to a `[dev]` extra. `mnemo-server` is a console entry point,
+`pytest` moved to a `[dev]` extra. `mnemolite-server` is a console entry point,
 `pytest` collects only `tests/`, and `.github/workflows/tests.yml` runs the
 suite on Python 3.10-3.12.
 
@@ -213,10 +213,10 @@ suite on Python 3.10-3.12.
   (+ `base_weight`, `last_decay_at`), `edges_archive`, `episode_edges`.
 - Public Python API unchanged; MCP adds `delete_memory` and `decay_memory`.
   Schema additions are idempotent and additive.
-- Distribution: `mnemo-local-memory`; import package `mnemo`; console script
-  `mnemo-server`.
-- Skill: `skill/mnemo-local-memory/` plus the upload-ready
-  `skill/mnemo-local-memory.zip`; contract in `docs/skill.md`.
+- Distribution: `mnemolite`; import package `mnemolite`; console script
+  `mnemolite-server`.
+- Skill: `skill/mnemolite-memory/` source plus a generated, gitignored
+  `skill/mnemolite-memory.zip`; contract in `docs/skill.md`.
 - Existing databases keep working. Facts extracted before `episode_edges`
   existed cannot be attributed to an episode, so deleting old episodes does not
   remove those legacy edges.
@@ -227,12 +227,12 @@ suite on Python 3.10-3.12.
 pip install -e ".[dev]"
 .\venv\Scripts\python.exe -m pytest -q
 python test_mcp_client.py   # hermetic; needs unrestricted process/pipe creation
-python -m mnemo.server      # or: mnemo-server
+python -m mnemolite.server      # or: mnemolite-server
 python -m build             # wheel + sdist into dist/
 ```
 
-The MCP store is controlled by `MNEMO_DATA_DIR`, `MNEMO_DB_PATH` and
-`MNEMO_CHROMA_PATH`. On Windows, if `%TEMP%` is not writable the test suite
+The MCP store is controlled by `MNEMOLITE_DATA_DIR`, `MNEMOLITE_DB_PATH` and
+`MNEMOLITE_CHROMA_PATH`. On Windows, if `%TEMP%` is not writable the test suite
 falls back to `.pytest_tmp/` automatically; `pytest -q --basetemp=.pytest_tmp`
 forces it.
 
@@ -256,6 +256,8 @@ forces it.
 
 ### P3 — release operations
 
-- Publish `mnemo-local-memory` to the package index and tag the release.
+- Publish `mnemolite` to the package index and tag the release.
+- Rename the GitHub repository to `mnemolite` and update the project and skill
+  URLs; the current links point at the existing repository slug.
 - Add signed release artifacts or checksums if the distribution channel
   requires them.

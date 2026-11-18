@@ -1,6 +1,6 @@
 """End-to-end MCP smoke test.
 
-Runs the server against a temporary ``MNEMO_DATA_DIR`` and asserts the full
+Runs the server against a temporary ``MNEMOLITE_DATA_DIR`` and asserts the full
 add -> consolidate -> recall -> delete -> decay cycle. Not part of the unit
 suite: it spawns a subprocess and downloads/loads the embedding model.
 """
@@ -40,7 +40,7 @@ def _episode_id(message: str) -> str:
 async def _run(env: dict[str, str]) -> None:
     server_params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "mnemo.server"],
+        args=["-m", "mnemolite.server"],
         cwd=str(PROJECT_ROOT),
         env=env,
     )
@@ -104,14 +104,14 @@ async def _run(env: dict[str, str]) -> None:
 
 
 async def main() -> None:
-    with tempfile.TemporaryDirectory(prefix="mnemo-mcp-") as data_dir:
+    with tempfile.TemporaryDirectory(prefix="mnemolite-mcp-") as data_dir:
         # The sandbox may deny a nested mkdir or SQLite temp files to the server
         # process while allowing writes in the data dir, so pre-create Chroma's
         # directory and point TEMP/TMP at the same workspace location.
-        (Path(data_dir) / "mnemo_mcp_chroma").mkdir()
+        (Path(data_dir) / "mnemolite_mcp_chroma").mkdir()
         env = {
             **os.environ,
-            "MNEMO_DATA_DIR": data_dir,
+            "MNEMOLITE_DATA_DIR": data_dir,
             "TEMP": data_dir,
             "TMP": data_dir,
         }

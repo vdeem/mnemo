@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mnemolite": {
+      "command": "mnemolite-server",
+      "args": [],
+      "env": {
+        "MNEMOLITE_DATA_DIR": "~/.mnemolite"
+      }
+    }
+  }
+}

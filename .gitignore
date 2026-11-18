@@ -26,8 +26,8 @@ chroma_db/
 test_chroma/
 test_chroma_decay
 test_decay
-test_mnemo
-mnemo_mcp_chroma
+test_mnemolite
+mnemolite_mcp_chroma
 *.db
 *.db-wal
 *.db-shm
@@ -36,7 +36,7 @@ mnemo_mcp_chroma
 *_chroma/
 test_chroma_triples
 # Generated memory state
-.mnemo/
+.mnemolite/
 # Markdown by default, docs and the agent guide are public
 *.md
 # Exceptions
@@ -46,3 +46,5 @@ test_chroma_triples
 !docs/*.md
 !docs/**/*.md
 !skill/**/*.md
+# Skill archives are release artifacts, rebuilt from source
+skill/*.zip

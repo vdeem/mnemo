@@ -50,7 +50,7 @@ def _configure(conn: sqlite3.Connection) -> None:
 
 
 class Database:
-    def __init__(self, db_path="mnemo.db"):
+    def __init__(self, db_path="mnemolite.db"):
         self.db_path = db_path
         self._init_db()
 

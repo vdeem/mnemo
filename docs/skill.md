@@ -1,15 +1,15 @@
 # Agent skill packaging
 
-The `skill/mnemo-local-memory/` directory is a self-contained Agent Skills
-package for the Mnemo MCP server. It contains no Python package code: the server
-is installed from the `mnemo-local-memory` distribution (or an editable
-checkout), and the skill teaches an agent when and how to call its tools.
+The `skill/mnemolite-memory/` directory is a self-contained Agent Skills
+package for the Mnemolite MCP server. It contains no Python package code: the server
+is installed from the `mnemolite` distribution (or an editable checkout), and
+the skill teaches an agent when and how to call its tools.
 
 ## Layout
 
 ```text
 skill/
-└── mnemo-local-memory/          # must match `name` in SKILL.md
+└── mnemolite-memory/          # must match `name` in SKILL.md
     ├── SKILL.md
     ├── references/
     │   ├── tools.md
@@ -29,7 +29,7 @@ contract.
 
 ## Frontmatter contract
 
-- `name: mnemo-local-memory` matches the directory name, uses only lowercase
+- `name: mnemolite-memory` matches the directory name, uses only lowercase
   letters, digits and hyphens, and stays under 64 characters.
 - `description` is under 1024 characters and says both what the skill does and
   when to use it.
@@ -45,7 +45,7 @@ contract.
 ## Install for a user
 
 ```bash
-pip install mnemo-local-memory
+pip install mnemolite
 ```
 
 From a checkout:
@@ -56,36 +56,36 @@ python -m spacy download en_core_web_sm
 ```
 
 The embedding model downloads on the first server start. Configure the MCP
-client with `skill/mnemo-local-memory/scripts/mcp_config.json`; it launches
-`mnemo-server` over stdio and points `MNEMO_DATA_DIR` at a user-writable
+client with `skill/mnemolite-memory/scripts/mcp_config.json`; it launches
+`mnemolite-server` over stdio and points `MNEMOLITE_DATA_DIR` at a user-writable
 directory. Verify the connection:
 
 ```bash
-python skill/mnemo-local-memory/scripts/verify_tools.py
+python skill/mnemolite-memory/scripts/verify_tools.py
 ```
 
 The check uses a disposable temporary store and prints the five tool names.
 
 ## Build the archive
 
-The archive root must contain `mnemo-local-memory/SKILL.md`.
+The archive root must contain `mnemolite-memory/SKILL.md`.
 
 PowerShell:
 
 ```powershell
 cd skill
-Compress-Archive -Path .\mnemo-local-memory -DestinationPath .\mnemo-local-memory.zip -Force
+Compress-Archive -Path .\mnemolite-memory -DestinationPath .\mnemolite-memory.zip -Force
 ```
 
 POSIX:
 
 ```bash
 cd skill
-zip -r mnemo-local-memory.zip mnemo-local-memory
+zip -r mnemolite-memory.zip mnemolite-memory
 ```
 
-Rebuild the archive after every skill change. The repository keeps the archive
-next to its source so a release can upload it directly.
+Rebuild the archive after every skill change. The ZIP is a release artifact: it
+is gitignored and generated from the tracked source; do not commit it.
 
 ## Validation before release
 
@@ -94,10 +94,10 @@ next to its source so a release can upload it directly.
 3. `pip install -e ".[dev,build]"` then `python -m build` produces a wheel and
    sdist, and `twine check dist/*` succeeds.
 4. A fresh virtual environment installs the wheel and starts
-   `mnemo-server`.
-5. `python skill/mnemo-local-memory/scripts/verify_tools.py` prints
-   `Mnemo MCP server is reachable.`
-6. The ZIP contains `mnemo-local-memory/SKILL.md`, all references and examples,
+   `mnemolite-server`.
+5. `python skill/mnemolite-memory/scripts/verify_tools.py` prints
+   `Mnemolite MCP server is reachable.`
+6. The ZIP contains `mnemolite-memory/SKILL.md`, all references and examples,
    and no generated caches or memory databases.
 7. No secrets, local paths, database files or model caches are present in the
    archive.

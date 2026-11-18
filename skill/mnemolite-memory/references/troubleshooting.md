@@ -1,24 +1,23 @@
 # Troubleshooting
 
-## The Mnemo tools are missing
+## The Mnemolite tools are missing
 
 The MCP client is not connected to the server. Check:
 
 1. The server is installed in the same Python environment:
-   `pip install mnemo-local-memory` (or `pip install -e ".[dev]"` from a
-   checkout).
+   `pip install mnemolite` (or `pip install -e ".[dev]"` from a checkout).
 2. The MCP config points at that interpreter:
    see `scripts/mcp_config.json`.
 3. Restart the client after editing its MCP config.
 4. From a terminal, run `python scripts/verify_tools.py` (or
-   `python -m mnemo.server` manually) and check the log output.
+   `python -m mnemolite.server` manually) and check the log output.
 
 ## The server exits immediately / `Connection closed`
 
 Run it directly to see the traceback:
 
 ```bash
-python -m mnemo.server
+python -m mnemolite.server
 ```
 
 Common causes:
@@ -32,8 +31,8 @@ Common causes:
 
 Chroma/SQLite cannot create its files in the configured location.
 
-- Set `MNEMO_DATA_DIR` to a writable directory, or set
-  `MNEMO_DB_PATH`/`MNEMO_CHROMA_PATH` explicitly.
+- Set `MNEMOLITE_DATA_DIR` to a writable directory, or set
+  `MNEMOLITE_DB_PATH`/`MNEMOLITE_CHROMA_PATH` explicitly.
 - On Windows, `%TEMP%` may be read-only in a sandbox. Point `TEMP` and `TMP`
   at the data directory for the server process.
 - Do not point two server processes at the same Chroma directory if one of them
@@ -98,10 +97,10 @@ its files, especially on Windows.
 
 ## Where the data lives
 
-- Default: checkout root when running from a checkout, otherwise `~/.mnemo`.
-- Override: `MNEMO_DATA_DIR`, `MNEMO_DB_PATH`, `MNEMO_CHROMA_PATH`.
-- Files: `mnemo_mcp.db` (episodes/nodes/edges) and
-  `mnemo_mcp_chroma/` (vectors).
+- Default: checkout root when running from a checkout, otherwise `~/.mnemolite`.
+- Override: `MNEMOLITE_DATA_DIR`, `MNEMOLITE_DB_PATH`, `MNEMOLITE_CHROMA_PATH`.
+- Files: `mnemolite_mcp.db` (episodes/nodes/edges) and
+  `mnemolite_mcp_chroma/` (vectors).
 - Back up both if you need a consistent backup; SQLite is the source of truth
   and Chroma can be rebuilt.
 

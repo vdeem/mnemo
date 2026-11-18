@@ -38,11 +38,11 @@ PRESETS: dict[str, RecallWeights] = {
     ),
 }
 
-RECALL_PRESET_ENV = "MNEMO_RECALL_PRESET"
+RECALL_PRESET_ENV = "MNEMOLITE_RECALL_PRESET"
 
 # Chroma returns squared L2 distance for normalized e5 vectors, so this equals
 # cosine similarity >= 0.75. Weak matches are noise; callers can widen it with
-# MNEMO_MAX_DISTANCE or the max_distance argument.
+# MNEMOLITE_MAX_DISTANCE or the max_distance argument.
 DEFAULT_MAX_DISTANCE = 0.5
 
 # A query can mention several entities and every graph lookup returns its own
@@ -51,7 +51,7 @@ MAX_RECALL_FACTS = 20
 
 
 def _weights_from_env() -> RecallWeights | None:
-    """Resolve ``MNEMO_RECALL_PRESET``; unknown names fail fast and loud."""
+    """Resolve ``MNEMOLITE_RECALL_PRESET``; unknown names fail fast and loud."""
     name = (os.getenv(RECALL_PRESET_ENV) or "").strip().lower()
     if not name:
         return None
@@ -63,8 +63,8 @@ def _weights_from_env() -> RecallWeights | None:
         ) from None
 
 
-class Mnemo:
-    def __init__(self, db_path="mnemo.db", chroma_path="./chroma_db",
+class Mnemolite:
+    def __init__(self, db_path="mnemolite.db", chroma_path="./chroma_db",
                  weights: RecallWeights | None = None):
         # Explicit weights beat the environment preset, which beats balanced.
         if weights is None:
@@ -125,7 +125,7 @@ class Mnemo:
         untouched: the next call resumes instead of double-counting weights.
 
         After a pass that processed at least one episode, writes the Markdown
-        agent brief (``.mnemo/AGENT_CONTEXT.md`` in the CWD by default, or
+        agent brief (``.mnemolite/AGENT_CONTEXT.md`` in the CWD by default, or
         ``brief_path``) so a non-MCP agent can read the memory state at startup.
         """
         episodes = self.db.get_unconsolidated_episodes(limit)
@@ -134,7 +134,7 @@ class Mnemo:
         processed = self.consolidator.consolidate(episodes, self.db)
         if processed:
             if write_brief:
-                path = Path(brief_path) if brief_path else Path(".mnemo") / "AGENT_CONTEXT.md"
+                path = Path(brief_path) if brief_path else Path(".mnemolite") / "AGENT_CONTEXT.md"
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(self.render_brief(), encoding="utf-8", newline="\n")
                 log.info("wrote agent brief to %s", path)
@@ -173,7 +173,7 @@ class Mnemo:
         """
         if max_distance is None:
             max_distance = float(
-                os.getenv("MNEMO_MAX_DISTANCE", str(DEFAULT_MAX_DISTANCE))
+                os.getenv("MNEMOLITE_MAX_DISTANCE", str(DEFAULT_MAX_DISTANCE))
             )
 
         raw_episodes = self.embedder.search(query, k=max(k * 3, k))
@@ -274,7 +274,7 @@ class Mnemo:
         """Release Chroma handles (Windows keeps files locked otherwise).
 
         ``Client.close()`` is refcounted: the underlying system is only stopped
-        and evicted once no client uses that path, so a later ``Mnemo`` on the
+        and evicted once no client uses that path, so a later ``Mnemolite`` on the
         same path starts a fresh system instead of reusing a stopped one.
         """
         client = self.embedder.client

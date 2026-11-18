@@ -5,45 +5,45 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from mnemo.core import (
+from mnemolite.core import (
     DEFAULT_MAX_DISTANCE,
     MAX_RECALL_FACTS,
     PRESETS,
-    Mnemo,
+    Mnemolite,
     RecallWeights,
 )
 
 
-def test_recall_empty_db(mnemo):
-    assert mnemo.recall("anything") == {"episodes": [], "facts": []}
+def test_recall_empty_db(mnemolite):
+    assert mnemolite.recall("anything") == {"episodes": [], "facts": []}
 
 
-def test_recall_exact_match(mnemo):
-    mnemo.add("The user works at Acme Corp.")
-    result = mnemo.recall("Where does the user work?")
+def test_recall_exact_match(mnemolite):
+    mnemolite.add("The user works at Acme Corp.")
+    result = mnemolite.recall("Where does the user work?")
     assert len(result["episodes"]) > 0
 
 
-def test_recall_respects_max_distance(mnemo):
-    mnemo.add("The user likes coffee.")
+def test_recall_respects_max_distance(mnemolite):
+    mnemolite.add("The user likes coffee.")
     # An absurdly tight threshold should drop everything.
-    result = mnemo.recall("quantum physics", max_distance=0.01)
+    result = mnemolite.recall("quantum physics", max_distance=0.01)
     assert result["episodes"] == []
 
 
-def test_add_same_episode_twice_does_not_raise(mnemo):
-    ep_id = mnemo.add("The user likes coffee.")
+def test_add_same_episode_twice_does_not_raise(mnemolite):
+    ep_id = mnemolite.add("The user likes coffee.")
 
     # Re-adding the same vector id exercises the upsert path directly; a plain
     # collection.add() would raise a Chroma duplicate-id error here.
-    mnemo.embedder.add(ids=[ep_id], documents=["The user likes coffee."])
+    mnemolite.embedder.add(ids=[ep_id], documents=["The user likes coffee."])
 
-    assert [ep["id"] for ep in mnemo.recall("coffee")["episodes"]] == [ep_id]
+    assert [ep["id"] for ep in mnemolite.recall("coffee")["episodes"]] == [ep_id]
 
 
 def test_ensure_ids_reindexes_missing(tmp_db_path, tmp_chroma_path):
     """A vector lost from the index is rebuilt from SQLite on the next startup."""
-    first = Mnemo(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
+    first = Mnemolite(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
     try:
         ep_id = first.add("The user likes coffee.")
         first.embedder.delete([ep_id])
@@ -51,7 +51,7 @@ def test_ensure_ids_reindexes_missing(tmp_db_path, tmp_chroma_path):
     finally:
         first.close()
 
-    second = Mnemo(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
+    second = Mnemolite(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
     try:
         assert [ep["id"] for ep in second.recall("coffee")["episodes"]] == [ep_id]
     finally:
@@ -59,30 +59,30 @@ def test_ensure_ids_reindexes_missing(tmp_db_path, tmp_chroma_path):
 
 
 def test_recall_weights_balanced_default(monkeypatch, tmp_db_path, tmp_chroma_path):
-    monkeypatch.delenv("MNEMO_RECALL_PRESET", raising=False)
-    mnemo = Mnemo(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
+    monkeypatch.delenv("MNEMOLITE_RECALL_PRESET", raising=False)
+    mnemolite = Mnemolite(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
     try:
-        assert mnemo.weights == RecallWeights()
-        assert mnemo.weights.salience == 0.10
-        assert mnemo.weights.valence == 0.25
-        assert mnemo.weights.recency == 0.10
-        assert mnemo.weights.recency_halflife_days == 45.0
+        assert mnemolite.weights == RecallWeights()
+        assert mnemolite.weights.salience == 0.10
+        assert mnemolite.weights.valence == 0.25
+        assert mnemolite.weights.recency == 0.10
+        assert mnemolite.weights.recency_halflife_days == 45.0
     finally:
-        mnemo.close()
+        mnemolite.close()
 
 
 def test_recall_weights_emotional_preset(monkeypatch, tmp_db_path, tmp_chroma_path):
-    monkeypatch.delenv("MNEMO_RECALL_PRESET", raising=False)
-    mnemo = Mnemo(
+    monkeypatch.delenv("MNEMOLITE_RECALL_PRESET", raising=False)
+    mnemolite = Mnemolite(
         db_path=tmp_db_path,
         chroma_path=tmp_chroma_path,
         weights=PRESETS["emotional"],
     )
     try:
-        vivid = mnemo.add(
+        vivid = mnemolite.add(
             "The user got engaged in Paris.", salience=0.95, dedupe=False
         )
-        faint = mnemo.add(
+        faint = mnemolite.add(
             "The user visited Paris once.", salience=0.05, dedupe=False
         )
 
@@ -94,82 +94,82 @@ def test_recall_weights_emotional_preset(monkeypatch, tmp_db_path, tmp_chroma_pa
                 {"id": vivid, "text": "The user got engaged in Paris.", "distance": 0.30},
             ]
 
-        monkeypatch.setattr(mnemo.embedder, "search", fake_search)
+        monkeypatch.setattr(mnemolite.embedder, "search", fake_search)
 
-        assert [ep["id"] for ep in mnemo.recall("Paris")["episodes"]] == [vivid, faint]
+        assert [ep["id"] for ep in mnemolite.recall("Paris")["episodes"]] == [vivid, faint]
 
         # Still the same data under balanced weights: similarity wins, which
         # proves the preset is what flipped the ranking.
-        mnemo.weights = PRESETS["balanced"]
-        assert [ep["id"] for ep in mnemo.recall("Paris")["episodes"]] == [faint, vivid]
+        mnemolite.weights = PRESETS["balanced"]
+        assert [ep["id"] for ep in mnemolite.recall("Paris")["episodes"]] == [faint, vivid]
     finally:
-        mnemo.close()
+        mnemolite.close()
 
 
 def test_recall_weights_env_override(monkeypatch, tmp_db_path, tmp_chroma_path):
-    monkeypatch.setenv("MNEMO_RECALL_PRESET", "emotional")
-    mnemo = Mnemo(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
+    monkeypatch.setenv("MNEMOLITE_RECALL_PRESET", "emotional")
+    mnemolite = Mnemolite(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
     try:
-        assert mnemo.weights.salience == 0.70
-        assert mnemo.weights.valence == 1.00
+        assert mnemolite.weights.salience == 0.70
+        assert mnemolite.weights.valence == 1.00
     finally:
-        mnemo.close()
+        mnemolite.close()
 
 
 def test_recall_weights_explicit_overrides_env(monkeypatch, tmp_db_path, tmp_chroma_path):
-    monkeypatch.setenv("MNEMO_RECALL_PRESET", "emotional")
-    mnemo = Mnemo(
+    monkeypatch.setenv("MNEMOLITE_RECALL_PRESET", "emotional")
+    mnemolite = Mnemolite(
         db_path=tmp_db_path,
         chroma_path=tmp_chroma_path,
         weights=RecallWeights(),
     )
     try:
-        assert mnemo.weights == PRESETS["balanced"]
-        assert mnemo.weights.salience == 0.10
+        assert mnemolite.weights == PRESETS["balanced"]
+        assert mnemolite.weights.salience == 0.10
     finally:
-        mnemo.close()
+        mnemolite.close()
 
 
 def test_recall_weights_unknown_preset_fails_fast(
     monkeypatch, tmp_db_path, tmp_chroma_path
 ):
-    monkeypatch.setenv("MNEMO_RECALL_PRESET", "dramatic")
-    with pytest.raises(ValueError, match="MNEMO_RECALL_PRESET"):
-        Mnemo(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
+    monkeypatch.setenv("MNEMOLITE_RECALL_PRESET", "dramatic")
+    with pytest.raises(ValueError, match="MNEMOLITE_RECALL_PRESET"):
+        Mnemolite(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
 
 
 def test_recall_weights_public_exports():
-    import mnemo
+    import mnemolite
 
-    assert mnemo.Mnemo is Mnemo
-    assert mnemo.RecallWeights is RecallWeights
-    assert mnemo.PRESETS is PRESETS
+    assert mnemolite.Mnemolite is Mnemolite
+    assert mnemolite.RecallWeights is RecallWeights
+    assert mnemolite.PRESETS is PRESETS
 
 
-def test_recall_ignores_orphan_vector(mnemo):
+def test_recall_ignores_orphan_vector(mnemolite):
     """A vector whose episode row is gone must not resurface as a memory."""
-    ep_id = mnemo.add("The vault code is 1234.")
+    ep_id = mnemolite.add("The vault code is 1234.")
     # Simulate a crash between the SQLite delete and the Chroma delete.
-    mnemo.db.delete_episodes([ep_id])
+    mnemolite.db.delete_episodes([ep_id])
 
-    assert mnemo.recall("vault")["episodes"] == []
-    assert mnemo.embedder.collection.count() == 1
+    assert mnemolite.recall("vault")["episodes"] == []
+    assert mnemolite.embedder.collection.count() == 1
 
 
-def test_readd_after_db_only_delete_is_durable(mnemo):
+def test_readd_after_db_only_delete_is_durable(mnemolite):
     """Re-adding a deleted text must insert a row, not reinforce a ghost."""
-    ep_id = mnemo.add("The vault code is 1234.")
-    mnemo.db.delete_episodes([ep_id])
+    ep_id = mnemolite.add("The vault code is 1234.")
+    mnemolite.db.delete_episodes([ep_id])
 
-    new_id = mnemo.add("The vault code is 1234.")
+    new_id = mnemolite.add("The vault code is 1234.")
 
     assert new_id != ep_id
-    assert mnemo.db.episode_id_for("The vault code is 1234.") == new_id
-    assert [ep["id"] for ep in mnemo.recall("vault")["episodes"]] == [new_id]
+    assert mnemolite.db.episode_id_for("The vault code is 1234.") == new_id
+    assert [ep["id"] for ep in mnemolite.recall("vault")["episodes"]] == [new_id]
 
 
 def test_startup_prunes_orphan_vectors(tmp_db_path, tmp_chroma_path):
-    first = Mnemo(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
+    first = Mnemolite(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
     try:
         ep_id = first.add("The vault code is 1234.")
         first.db.delete_episodes([ep_id])
@@ -177,25 +177,25 @@ def test_startup_prunes_orphan_vectors(tmp_db_path, tmp_chroma_path):
     finally:
         first.close()
 
-    second = Mnemo(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
+    second = Mnemolite(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
     try:
         assert second.embedder.collection.count() == 0
     finally:
         second.close()
 
 
-def test_exact_duplicate_heals_missing_vector(mnemo):
-    ep_id = mnemo.add("The vault code is 1234.")
-    mnemo.embedder.delete([ep_id])
-    assert mnemo.embedder.collection.count() == 0
+def test_exact_duplicate_heals_missing_vector(mnemolite):
+    ep_id = mnemolite.add("The vault code is 1234.")
+    mnemolite.embedder.delete([ep_id])
+    assert mnemolite.embedder.collection.count() == 0
 
-    assert mnemo.add("The vault code is 1234.") == ep_id
-    assert mnemo.embedder.collection.count() == 1
+    assert mnemolite.add("The vault code is 1234.") == ep_id
+    assert mnemolite.embedder.collection.count() == 1
 
 
-def test_recall_default_max_distance_filters_weak_matches(monkeypatch, mnemo):
-    close = mnemo.add("A close memory.")
-    far = mnemo.add("A far memory.", dedupe=False)
+def test_recall_default_max_distance_filters_weak_matches(monkeypatch, mnemolite):
+    close = mnemolite.add("A close memory.")
+    far = mnemolite.add("A far memory.", dedupe=False)
 
     def fake_search(query: str, k: int = 5):
         return [
@@ -211,16 +211,16 @@ def test_recall_default_max_distance_filters_weak_matches(monkeypatch, mnemo):
             },
         ]
 
-    monkeypatch.setattr(mnemo.embedder, "search", fake_search)
+    monkeypatch.setattr(mnemolite.embedder, "search", fake_search)
 
-    assert [ep["id"] for ep in mnemo.recall("memory")["episodes"]] == [close]
+    assert [ep["id"] for ep in mnemolite.recall("memory")["episodes"]] == [close]
 
 
-def test_recall_facts_exclude_cooccurrence(mnemo):
-    mnemo.add("Alice met Bob.")
-    mnemo.consolidate()
+def test_recall_facts_exclude_cooccurrence(mnemolite):
+    mnemolite.add("Alice met Bob.")
+    mnemolite.consolidate()
 
-    facts = mnemo.recall("Alice")["facts"]
+    facts = mnemolite.recall("Alice")["facts"]
 
     assert facts
     assert all(fact["relation"] != "co_occurs" for fact in facts)
@@ -234,44 +234,44 @@ def test_query_entities_keep_generic_subjects(consolidator):
     assert "user" not in consolidator.extract_entities(query)
 
 
-def test_recall_finds_user_graph_facts(mnemo):
-    mnemo.add("The user likes coffee.")
-    mnemo.consolidate(write_brief=False)
+def test_recall_finds_user_graph_facts(mnemolite):
+    mnemolite.add("The user likes coffee.")
+    mnemolite.consolidate(write_brief=False)
 
-    facts = mnemo.recall("What does the user like?")["facts"]
+    facts = mnemolite.recall("What does the user like?")["facts"]
     keys = {(fact["source"], fact["relation"], fact["target"]) for fact in facts}
 
     assert ("user", "like", "coffee") in keys
 
 
-def test_recall_returns_typed_facts_without_episode_matches(mnemo, monkeypatch):
+def test_recall_returns_typed_facts_without_episode_matches(mnemolite, monkeypatch):
     """Graph facts are independent of the vector index and its co_occurs mesh."""
-    mnemo.add("Alice knows Bob.")
-    mnemo.consolidate(write_brief=False)
+    mnemolite.add("Alice knows Bob.")
+    mnemolite.consolidate(write_brief=False)
 
-    alice = mnemo.db.get_or_create_node("alice")
+    alice = mnemolite.db.get_or_create_node("alice")
     for index in range(25):
-        target = mnemo.db.get_or_create_node(f"concept {index}")
-        mnemo.db.reinforce_edge(alice, target, relation="co_occurs")
-        mnemo.db.reinforce_edge(alice, target, relation="co_occurs")
+        target = mnemolite.db.get_or_create_node(f"concept {index}")
+        mnemolite.db.reinforce_edge(alice, target, relation="co_occurs")
+        mnemolite.db.reinforce_edge(alice, target, relation="co_occurs")
 
     monkeypatch.setattr(
-        mnemo.embedder, "search", lambda query, k=5: []
+        mnemolite.embedder, "search", lambda query, k=5: []
     )
 
-    result = mnemo.recall("Alice")
+    result = mnemolite.recall("Alice")
     keys = {(fact["source"], fact["relation"], fact["target"]) for fact in result["facts"]}
 
     assert result["episodes"] == []
     assert ("alice", "know", "bob") in keys
 
 
-def test_recall_returns_facts_when_episodes_miss_cutoff(mnemo, monkeypatch):
-    ep_id = mnemo.add("Alice knows Bob.")
-    mnemo.consolidate(write_brief=False)
+def test_recall_returns_facts_when_episodes_miss_cutoff(mnemolite, monkeypatch):
+    ep_id = mnemolite.add("Alice knows Bob.")
+    mnemolite.consolidate(write_brief=False)
 
     monkeypatch.setattr(
-        mnemo.embedder,
+        mnemolite.embedder,
         "search",
         lambda query, k=5: [
             {
@@ -282,93 +282,93 @@ def test_recall_returns_facts_when_episodes_miss_cutoff(mnemo, monkeypatch):
         ],
     )
 
-    result = mnemo.recall("Alice")
+    result = mnemolite.recall("Alice")
     keys = {(fact["source"], fact["relation"], fact["target"]) for fact in result["facts"]}
 
     assert result["episodes"] == []
     assert ("alice", "know", "bob") in keys
 
 
-def test_recall_returns_facts_when_vector_index_is_empty(mnemo, monkeypatch):
-    mnemo.add("Alice knows Bob.")
-    mnemo.consolidate(write_brief=False)
+def test_recall_returns_facts_when_vector_index_is_empty(mnemolite, monkeypatch):
+    mnemolite.add("Alice knows Bob.")
+    mnemolite.consolidate(write_brief=False)
 
     monkeypatch.setattr(
-        mnemo.embedder, "search", lambda query, k=5: []
+        mnemolite.embedder, "search", lambda query, k=5: []
     )
 
-    result = mnemo.recall("Alice")
+    result = mnemolite.recall("Alice")
     keys = {(fact["source"], fact["relation"], fact["target"]) for fact in result["facts"]}
 
     assert result["episodes"] == []
     assert ("alice", "know", "bob") in keys
 
 
-def test_recall_facts_are_deduplicated(mnemo):
-    mnemo.add("Alice knows Bob.")
-    mnemo.consolidate()
+def test_recall_facts_are_deduplicated(mnemolite):
+    mnemolite.add("Alice knows Bob.")
+    mnemolite.consolidate()
 
-    facts = mnemo.recall("Alice knows Bob.")["facts"]
+    facts = mnemolite.recall("Alice knows Bob.")["facts"]
 
     keys = [(fact["source"], fact["relation"], fact["target"]) for fact in facts]
     assert ("alice", "know", "bob") in keys
     assert len(keys) == len(set(keys))
 
 
-def test_add_dedupe_false_allows_identical_content(mnemo):
-    first = mnemo.add("The vault code is 1234.", dedupe=False)
-    second = mnemo.add("The vault code is 1234.", dedupe=False)
+def test_add_dedupe_false_allows_identical_content(mnemolite):
+    first = mnemolite.add("The vault code is 1234.", dedupe=False)
+    second = mnemolite.add("The vault code is 1234.", dedupe=False)
 
     assert first != second
-    assert len(mnemo.recall("The vault code is 1234.", k=5)["episodes"]) == 2
+    assert len(mnemolite.recall("The vault code is 1234.", k=5)["episodes"]) == 2
 
 
-def test_correction_is_not_swallowed_as_a_near_duplicate(mnemo):
+def test_correction_is_not_swallowed_as_a_near_duplicate(mnemolite):
     """A correction is a new fact, not a duplicate to merge.
 
     "dark mode" and "light mode" are ~0.09 squared-L2 apart on the default e5
     model, so an embedding-distance dedupe used to keep only the stale text.
     """
-    original = mnemo.add("The user prefers dark mode.")
-    corrected = mnemo.add("The user prefers light mode.")
+    original = mnemolite.add("The user prefers dark mode.")
+    corrected = mnemolite.add("The user prefers light mode.")
 
     assert corrected != original
-    assert {episode["content"] for episode in mnemo.db.all_episodes()} == {
+    assert {episode["content"] for episode in mnemolite.db.all_episodes()} == {
         "The user prefers dark mode.",
         "The user prefers light mode.",
     }
-    assert mnemo.embedder.collection.count() == 2
+    assert mnemolite.embedder.collection.count() == 2
 
 
-def test_repeat_add_merges_metadata_and_salience(mnemo):
-    ep_id = mnemo.add("The user likes green tea.", metadata={"source": "chat"})
+def test_repeat_add_merges_metadata_and_salience(mnemolite):
+    ep_id = mnemolite.add("The user likes green tea.", metadata={"source": "chat"})
 
-    again = mnemo.add(
+    again = mnemolite.add(
         "The user likes green tea.",
         metadata={"valence": 0.9},
         salience=0.9,
     )
 
     assert again == ep_id
-    details = mnemo.db.get_episode_details([ep_id])[ep_id]
+    details = mnemolite.db.get_episode_details([ep_id])[ep_id]
     assert details["metadata"] == {"source": "chat", "valence": 0.9}
     assert details["salience"] == 0.9
 
 
-def test_salience_is_clamped(mnemo):
-    ep_id = mnemo.add("A very vivid memory.", salience=7.5)
+def test_salience_is_clamped(mnemolite):
+    ep_id = mnemolite.add("A very vivid memory.", salience=7.5)
 
-    assert mnemo.db.get_episode_details([ep_id])[ep_id]["salience"] == 1.0
+    assert mnemolite.db.get_episode_details([ep_id])[ep_id]["salience"] == 1.0
 
 
-def test_add_rejects_blank_text(mnemo):
+def test_add_rejects_blank_text(mnemolite):
     with pytest.raises(ValueError, match="must not be empty"):
-        mnemo.add("   ")
+        mnemolite.add("   ")
 
 
-def test_long_episode_warns_about_truncation(mnemo, caplog):
-    with caplog.at_level(logging.WARNING, logger="mnemo.embedder"):
-        mnemo.add("The user likes coffee. " * 300)
+def test_long_episode_warns_about_truncation(mnemolite, caplog):
+    with caplog.at_level(logging.WARNING, logger="mnemolite.embedder"):
+        mnemolite.add("The user likes coffee. " * 300)
 
     assert any("keeps only" in record.getMessage() for record in caplog.records)
 
@@ -378,17 +378,17 @@ def test_recall_weights_are_frozen():
         PRESETS["balanced"].salience = 0.9
 
 
-def test_recall_facts_are_capped(mnemo):
-    alice = mnemo.db.get_or_create_node("alice")
-    bob = mnemo.db.get_or_create_node("bob")
+def test_recall_facts_are_capped(mnemolite):
+    alice = mnemolite.db.get_or_create_node("alice")
+    bob = mnemolite.db.get_or_create_node("bob")
     for index in range(MAX_RECALL_FACTS + 5):
-        target = mnemo.db.get_or_create_node(f"concept {index}")
-        mnemo.db.reinforce_edge(alice, target, relation="knows")
-        mnemo.db.reinforce_edge(bob, target, relation="knows")
+        target = mnemolite.db.get_or_create_node(f"concept {index}")
+        mnemolite.db.reinforce_edge(alice, target, relation="knows")
+        mnemolite.db.reinforce_edge(bob, target, relation="knows")
 
-    mnemo.add("Alice and Bob are here.")
-    mnemo.consolidate()
+    mnemolite.add("Alice and Bob are here.")
+    mnemolite.consolidate()
 
-    facts = mnemo.recall("Alice and Bob are here.")["facts"]
+    facts = mnemolite.recall("Alice and Bob are here.")["facts"]
 
     assert 0 < len(facts) <= MAX_RECALL_FACTS

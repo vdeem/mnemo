@@ -1,10 +1,10 @@
-"""MCP server for Mnemo.
+"""MCP server for Mnemolite.
 
 Exposes the memory engine over stdio. The store location is independent of the
 launch directory:
 
-- ``MNEMO_DATA_DIR`` — base directory for the default DB and Chroma store.
-- ``MNEMO_DB_PATH`` / ``MNEMO_CHROMA_PATH`` — explicit overrides.
+- ``MNEMOLITE_DATA_DIR`` — base directory for the default DB and Chroma store.
+- ``MNEMOLITE_DB_PATH`` / ``MNEMOLITE_CHROMA_PATH`` — explicit overrides.
 """
 
 import json
@@ -20,32 +20,32 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 
-from mnemo import Mnemo
+from mnemolite import Mnemolite
 
 log = logging.getLogger(__name__)
 
 
 def _data_dir() -> Path:
     """Stable default data directory, independent of the launch CWD."""
-    override = os.getenv("MNEMO_DATA_DIR")
+    override = os.getenv("MNEMOLITE_DATA_DIR")
     if override:
         return Path(override).expanduser()
     project_root = Path(__file__).resolve().parent.parent
     if (project_root / "pyproject.toml").exists():
         return project_root
-    return Path.home() / ".mnemo"
+    return Path.home() / ".mnemolite"
 
 
 def _db_path() -> Path:
-    override = os.getenv("MNEMO_DB_PATH")
-    return Path(override).expanduser() if override else _data_dir() / "mnemo_mcp.db"
+    override = os.getenv("MNEMOLITE_DB_PATH")
+    return Path(override).expanduser() if override else _data_dir() / "mnemolite_mcp.db"
 
 
 def _chroma_path() -> Path:
-    override = os.getenv("MNEMO_CHROMA_PATH")
+    override = os.getenv("MNEMOLITE_CHROMA_PATH")
     if override:
         return Path(override).expanduser()
-    return _data_dir() / "mnemo_mcp_chroma"
+    return _data_dir() / "mnemolite_mcp_chroma"
 
 
 def _brief_path() -> Path:
@@ -53,7 +53,7 @@ def _brief_path() -> Path:
 
 
 @asynccontextmanager
-async def lifespan(_server: MCPServer) -> AsyncIterator[Mnemo]:
+async def lifespan(_server: MCPServer) -> AsyncIterator[Mnemolite]:
     """Open the store for the server lifetime and release it on shutdown."""
     db_path = _db_path()
     chroma_path = _chroma_path()
@@ -62,17 +62,17 @@ async def lifespan(_server: MCPServer) -> AsyncIterator[Mnemo]:
     # allow file writes in a new temp dir while denying a nested mkdir, which
     # makes Chroma fail with SQLITE_CANTOPEN (code 14).
     chroma_path.mkdir(parents=True, exist_ok=True)
-    log.info("opening Mnemo at %s (chroma: %s)", db_path, chroma_path)
-    memory = Mnemo(db_path=str(db_path), chroma_path=str(chroma_path))
+    log.info("opening Mnemolite at %s (chroma: %s)", db_path, chroma_path)
+    memory = Mnemolite(db_path=str(db_path), chroma_path=str(chroma_path))
     try:
         yield memory
     finally:
         memory.close()
-        log.info("Mnemo store closed")
+        log.info("Mnemolite store closed")
 
 
 mcp = MCPServer(
-    "Mnemo Memory",
+    "Mnemolite Memory",
     instructions=(
         "Local-first memory for AI agents. Add episodes with add_memory, "
         "build the graph with consolidate_memory, retrieve context with "
@@ -82,10 +82,10 @@ mcp = MCPServer(
 )
 
 
-def _memory(ctx: Context) -> Mnemo:
+def _memory(ctx: Context) -> Mnemolite:
     memory = ctx.request_context.lifespan_context
-    if not isinstance(memory, Mnemo):
-        raise ToolError("Mnemo store is not available in this request")
+    if not isinstance(memory, Mnemolite):
+        raise ToolError("Mnemolite store is not available in this request")
     return memory
 
 
@@ -218,7 +218,7 @@ async def decay_memory(
 
 
 def main() -> None:
-    """Run the Mnemo MCP server over stdio."""
+    """Run the Mnemolite MCP server over stdio."""
     mcp.run()
 
 

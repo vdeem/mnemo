@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for the Mnemo test suite."""
+"""Shared pytest fixtures for the Mnemolite test suite."""
 
 import os
 import tempfile
@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from mnemo.consolidator import Consolidator
-from mnemo.core import Mnemo
-from mnemo.db import Database
+from mnemolite.consolidator import Consolidator
+from mnemolite.core import Mnemolite
+from mnemolite.db import Database
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _WORKSPACE_TMP = _REPO_ROOT / ".pytest_tmp"
@@ -18,7 +18,7 @@ def _is_writable_dir(path: Path) -> bool:
     """True if a file can be created (and removed) in ``path``."""
     try:
         path.mkdir(parents=True, exist_ok=True)
-        probe = path / f".mnemo-write-probe-{os.getpid()}"
+        probe = path / f".mnemolite-write-probe-{os.getpid()}"
         probe.write_bytes(b"")
         probe.unlink()
         return True
@@ -70,9 +70,9 @@ def db(tmp_db_path):
 
 
 @pytest.fixture
-def mnemo(tmp_db_path, tmp_chroma_path):
-    """Fresh Mnemo instance; Chroma handles released on teardown."""
-    instance = Mnemo(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
+def mnemolite(tmp_db_path, tmp_chroma_path):
+    """Fresh Mnemolite instance; Chroma handles released on teardown."""
+    instance = Mnemolite(db_path=tmp_db_path, chroma_path=tmp_chroma_path)
     yield instance
     instance.close()
 

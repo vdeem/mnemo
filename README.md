@@ -1,12 +1,12 @@
-# Mnemo
+# Mnemolite
 
 A local-first, zero-LLM memory engine for AI agents.
 
-## Why Mnemo?
+## Why Mnemolite?
 
 Most AI memory solutions (Mem0, Zep) use LLM calls on every message to extract facts. This is expensive, slow, and requires an API key.
 
-Mnemo takes a different approach: **cognitive consolidation**. It uses local NLP and embeddings to build a semantic knowledge graph entirely on your machine.
+Mnemolite takes a different approach: **cognitive consolidation**. It uses local NLP and embeddings to build a semantic knowledge graph entirely on your machine.
 
 - **No API costs**
 - **No data leaks**
@@ -15,7 +15,7 @@ Mnemo takes a different approach: **cognitive consolidation**. It uses local NLP
 ## Features
 
 - **Zero-LLM Extraction** — spaCy NER plus dependency-based triples with lemmatized endpoints and negation-aware predicates (`not_like`, `is_not_a`) build the graph. No clustering, no second encoder, no OpenAI call, ever.
-- **Multilingual by default** — Vectors come from `intfloat/multilingual-e5-small` (override with `MNEMO_EMBED_MODEL`), so a Chinese query can recall an English memory. Extraction itself stays English-only via `en_core_web_sm`.
+- **Multilingual by default** — Vectors come from `intfloat/multilingual-e5-small` (override with `MNEMOLITE_EMBED_MODEL`), so a Chinese query can recall an English memory. Extraction itself stays English-only via `en_core_web_sm`.
 - **Hybrid Retrieval** — Combines vector similarity (episodic memory) with graph traversal (semantic memory).
 - **Honest retrieval** — A `max_distance` threshold (0.5 by default, cosine >= 0.75) cuts weak matches, so "nothing relevant" is a valid answer instead of noise; typed facts are deduplicated and capped.
 - **Local-First** — SQLite and ChromaDB on your disk.
@@ -23,12 +23,12 @@ Mnemo takes a different approach: **cognitive consolidation**. It uses local NLP
 - **Forgetting (Decay)** — Old, unreinforced connections fade away and are archived, preventing database bloat and keeping only the most relevant memories.
 - **Idempotent Consolidation** — Each episode is consolidated once; re-running `consolidate()` never inflates edge weights.
 - **Crash-safe and forgetful** — Deleting an episode removes the facts only it supported, and a consolidation pass interrupted mid-way resumes without double-counting weights.
-- **Agent brief** — After consolidation, Mnemo writes `.mnemo/AGENT_CONTEXT.md`, a human- and agent-readable summary of the current graph. Any agent (MCP or not) can read it at session start.
+- **Agent brief** — After consolidation, Mnemolite writes `.mnemolite/AGENT_CONTEXT.md`, a human- and agent-readable summary of the current graph. Any agent (MCP or not) can read it at session start.
 
 ## Installation
 
 ```bash
-pip install mnemo-local-memory
+pip install mnemolite
 ```
 
 From a checkout:
@@ -42,38 +42,38 @@ The spaCy pipeline (`en_core_web_sm`) and the embedding model (`intfloat/multili
 ## Quick Start
 
 ```python
-from mnemo.core import Mnemo
+from mnemolite.core import Mnemolite
 
 # Initialize
-mnemo = Mnemo(db_path="my_agent.db", chroma_path="./chroma_db")
+mnemolite = Mnemolite(db_path="my_agent.db", chroma_path="./chroma_db")
 
 # 1. Add memories (episodic layer)
-episode_id = mnemo.add("Alice is a software engineer based in London.")
-mnemo.add("Bob is working on a project using PyTorch.")
+episode_id = mnemolite.add("Alice is a software engineer based in London.")
+mnemolite.add("Bob is working on a project using PyTorch.")
 
 # 2. Consolidate (builds the graph; only new episodes are processed)
-mnemo.consolidate()
+mnemolite.consolidate()
 
 # 3. Recall (hybrid search)
-results = mnemo.recall("What technologies is Bob using?")
+results = mnemolite.recall("What technologies is Bob using?")
 
 print(results["episodes"])  # Raw texts from vector search
 print(results["facts"])     # Graph relations (Bob -> pytorch)
 
 # 4. Tighten recall: drop anything past the distance cutoff
 # (0.5 squared-L2 = cosine 0.75 on normalized embeddings)
-results = mnemo.recall("What technologies is Bob using?", k=3, max_distance=0.5)
+results = mnemolite.recall("What technologies is Bob using?", k=3, max_distance=0.5)
 
 # 5. Delete a memory (episode, vector and its graph contributions)
-mnemo.delete([episode_id])
+mnemolite.delete([episode_id])
 ```
 
 ## MCP server
 
 ```bash
-python -m mnemo.server
+python -m mnemolite.server
 # or, after an editable install:
-mnemo-server
+mnemolite-server
 ```
 
 The server exposes `add_memory`, `recall_memory`, `consolidate_memory`,
@@ -81,20 +81,21 @@ The server exposes `add_memory`, `recall_memory`, `consolidate_memory`,
 lifespan and closes Chroma on shutdown.
 
 By default the store lives in the checkout root (when running from a checkout)
-or `~/.mnemo`; override it with `MNEMO_DATA_DIR`, `MNEMO_DB_PATH` or
-`MNEMO_CHROMA_PATH`. This keeps the memory location independent of the
+or `~/.mnemolite`; override it with `MNEMOLITE_DATA_DIR`, `MNEMOLITE_DB_PATH` or
+`MNEMOLITE_CHROMA_PATH`. This keeps the memory location independent of the
 directory the MCP client launches the server from.
 
 ## Agent skill
 
-`skill/mnemo-local-memory/` is a self-contained Agent Skills package that
-teaches an agent when and how to call the Mnemo MCP tools. The upload-ready
-archive is `skill/mnemo-local-memory.zip`; it contains `SKILL.md`, references,
-examples, an MCP client configuration and a connectivity check.
+`skill/mnemolite-memory/` is a self-contained Agent Skills package that
+teaches an agent when and how to call the Mnemolite MCP tools. Build the
+upload-ready archive from that directory with the command in
+[docs/skill.md](docs/skill.md); the ZIP is a generated artifact and is not
+committed.
 
 - Packaging contract and release checklist: [docs/skill.md](docs/skill.md).
-- The skill requires the `mnemo-local-memory` package (or an editable checkout)
-  and a running `mnemo-server` over stdio.
+- The skill requires the `mnemolite` package (or an editable checkout)
+  and a running `mnemolite-server` over stdio.
 - No external LLM API is called by the server or the skill.
 
 ## How it works

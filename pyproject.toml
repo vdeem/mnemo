@@ -3,7 +3,7 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mnemo-local-memory"
+name = "mnemolite"
 version = "0.1.0"
 description = "Local-first, zero-LLM memory engine for AI agents"
 readme = "README.md"
@@ -35,7 +35,7 @@ dev = ["pytest>=8,<10"]
 build = ["build>=1,<2", "twine>=5,<7", "wheel>=0.42,<1"]
 
 [project.scripts]
-mnemo-server = "mnemo.server:main"
+mnemolite-server = "mnemolite.server:main"
 
 [project.urls]
 Homepage = "https://github.com/vdeem/mnemo"
@@ -45,7 +45,7 @@ Issues = "https://github.com/vdeem/mnemo/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["mnemo*"]
+include = ["mnemolite*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

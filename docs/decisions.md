@@ -5,7 +5,7 @@ Short records of choices that are expensive to reverse. Read on demand.
 ## ADR-001 — SQLite + ChromaDB instead of one store
 
 **Decision:** keep episode metadata and the knowledge graph in SQLite
-(`mnemo.db`), keep vectors in ChromaDB (`./chroma_db`).
+(`mnemolite.db`), keep vectors in ChromaDB (`./chroma_db`).
 
 **Why:** the graph needs joins, uniqueness constraints and transactional decay
 (`edges` → `edges_archive`); Chroma owns ANN search. SQLite is the source of
@@ -14,7 +14,7 @@ reindex, not data.
 
 **Consequences:** two files to back up; a vector can outlive (or lag behind) its
 episode row, so `Embedder.ensure_ids()` reconciles on startup and
-`Mnemo.delete()` removes from both.
+`Mnemolite.delete()` removes from both.
 
 ## ADR-002 — no external LLM calls
 
@@ -41,7 +41,7 @@ label nothing consumed; `scikit-learn` and `networkx` are now unused.
 ## ADR-004 — embedding model: `intfloat/multilingual-e5-small`
 
 **Decision:** the default embedding model is `intfloat/multilingual-e5-small`
-(`MNEMO_EMBED_MODEL` overrides it), replacing `all-MiniLM-L6-v2`.
+(`MNEMOLITE_EMBED_MODEL` overrides it), replacing `all-MiniLM-L6-v2`.
 
 **Why:** multilingual coverage with a 384-dimensional model of the same size
 class as the previous one, so storage and query cost are unchanged.
@@ -49,9 +49,9 @@ class as the previous one, so storage and query cost are unchanged.
 **Consequences (important):**
 
 - Vectors from different models are not comparable. Collections are namespaced
-  per model slug (`mnemo_episodes_<slug>`), so switching never mixes spaces.
+  per model slug (`mnemolite_episodes_<slug>`), so switching never mixes spaces.
 - The new collection starts empty; `Embedder.ensure_ids()` backfills it from
-  SQLite on the next `Mnemo` construction instead of hiding old episodes.
+  SQLite on the next `Mnemolite` construction instead of hiding old episodes.
 - e5 requires different prefixes per side: `passage: ` when indexing and
   `query: ` when searching. Both paths live in `Embedder`; keep them in sync.
 - Changing the model again requires this file, a default change, and a backfill.
@@ -60,8 +60,8 @@ class as the previous one, so storage and query cost are unchanged.
 
 **Decision:** the salience/valence/recency multipliers of `recall()` live in a
 `RecallWeights` dataclass with named presets (`balanced`, `emotional`). They can
-be selected per instance (`Mnemo(weights=...)`) or by environment variable
-(`MNEMO_RECALL_PRESET`). Semantic similarity keeps its unit weight.
+be selected per instance (`Mnemolite(weights=...)`) or by environment variable
+(`MNEMOLITE_RECALL_PRESET`). Semantic similarity keeps its unit weight.
 
 **Why:** Tera needs emotional dominance (salience + valence) while the sold
 skill needs semantic-similarity dominance. Hardcoded weights force either
@@ -70,7 +70,7 @@ of code.
 
 **Consequences:**
 
-- Resolution order: explicit `weights=` → `MNEMO_RECALL_PRESET` → `balanced`.
+- Resolution order: explicit `weights=` → `MNEMOLITE_RECALL_PRESET` → `balanced`.
   An unknown preset name raises `ValueError` at construction (fail fast).
 - `PRESETS` holds shared instances: treat them as read-only, or build a new
   `RecallWeights` before customising.
@@ -80,8 +80,8 @@ of code.
 ## ADR-006 — Markdown agent brief alongside the graph
 
 **Decision:** after a consolidation pass that processed at least one episode,
-write `.mnemo/AGENT_CONTEXT.md` in the CWD: recent typed activity, strongest
-connections, and active concepts, rendered from SQLite. `Mnemo.render_brief()`
+write `.mnemolite/AGENT_CONTEXT.md` in the CWD: recent typed activity, strongest
+connections, and active concepts, rendered from SQLite. `Mnemolite.render_brief()`
 returns the same Markdown without writing.
 
 **Why:** plain RAG hands an agent chunks on demand but no cheap overview of what
@@ -96,14 +96,14 @@ of the graph, not a second source of truth.
 - The `_Generated:` stamp is the newest data timestamp, not wall-clock time, so
   an unchanged graph produces byte-identical output; wall-clock stamps would
   turn every run into a git diff.
-- Writes are skipped when consolidation processed nothing; `.mnemo/` is
+- Writes are skipped when consolidation processed nothing; `.mnemolite/` is
   gitignored. Callers can opt out with `write_brief=False` or redirect with
   `brief_path=...`.
 - Rendering is read-only: no schema changes and no writes besides the brief.
 
 ## ADR-007 — SQLite is authoritative for the vector index
 
-**Decision:** `Mnemo.__init__` calls `Embedder.reconcile()`, which adds vectors
+**Decision:** `Mnemolite.__init__` calls `Embedder.reconcile()`, which adds vectors
 missing from Chroma and deletes vectors whose episode row no longer exists.
 `recall()` additionally skips any Chroma id that has no episode row.
 
@@ -138,7 +138,7 @@ episodes leaves them in place, which is documented in `docs/status.md`.
 
 **Decision:** `Consolidator.consolidate()` calls
 `Database.mark_consolidated(id, conn=conn)` inside the same `Database.batch()`
-that writes the episode's nodes and edges. `Mnemo.consolidate()` no longer marks
+that writes the episode's nodes and edges. `Mnemolite.consolidate()` no longer marks
 episodes after the pass.
 
 **Why:** marking after the loop meant a mid-pass crash left committed edges on
@@ -164,7 +164,7 @@ each query entity also returned the same edge multiple times plus the implicit
 `co_occurs` mesh, with no size bound — a direct context-bloat risk for agents.
 
 **Consequences:** precision is favoured over recall; callers that need wider
-matches pass `max_distance=` or set `MNEMO_MAX_DISTANCE`. The constant is
+matches pass `max_distance=` or set `MNEMOLITE_MAX_DISTANCE`. The constant is
 model-specific (distance is squared L2), so switching embedding models requires
 recalibration. `k` still controls episodes only; facts have their own cap.
 
@@ -197,9 +197,9 @@ not vector proximity alone.
 
 ## ADR-012 — MCP server owns a lifespan-scoped store in a stable directory
 
-**Decision:** `mnemo.server` no longer constructs `Mnemo` at import time. It
-resolves the store from `MNEMO_DATA_DIR` / `MNEMO_DB_PATH` /
-`MNEMO_CHROMA_PATH` (checkout root when running from a checkout, `~/.mnemo`
+**Decision:** `mnemolite.server` no longer constructs `Mnemolite` at import time. It
+resolves the store from `MNEMOLITE_DATA_DIR` / `MNEMOLITE_DB_PATH` /
+`MNEMOLITE_CHROMA_PATH` (checkout root when running from a checkout, `~/.mnemolite`
 otherwise), opens it in an `MCPServer` lifespan, and closes Chroma on shutdown.
 Tools access it through `Context.request_context.lifespan_context`, raise
 `ToolError`, and offload blocking calls with `anyio.to_thread`.
@@ -310,24 +310,25 @@ are dropped instead of creating junk edges; generic objects such as `project`
 are dropped until a more specific extraction rule exists. Legacy graphs keep
 nodes created before this change; new consolidation does not add them.
 
-## ADR-018 — distribution name and Agent Skills bundle
+## ADR-018 — Mnemolite rebrand and Agent Skills bundle
 
-**Decision:** publish the Python distribution as `mnemo-local-memory` while
-keeping the import package `mnemo` and the console script `mnemo-server`.
-Track `skill/mnemo-local-memory/` and its upload archive, describe the
-packaging contract in `docs/skill.md`, and validate the frontmatter, MCP config
-and archive in `tests/test_skill.py`.
+**Decision:** publish the distribution as `mnemolite` and use the same name for
+the import package and the `mnemolite-server` console script. Name the skill
+bundle `mnemolite-memory`, describe the packaging contract in `docs/skill.md`,
+and validate the frontmatter, MCP config and a reproducibly built archive in
+`tests/test_skill.py`. The archive is a gitignored release artifact.
 
-**Why:** the bare `mnemo` distribution name belongs to an unrelated project on
-the package index, so `pip install mnemo` cannot be this project. Renaming the
-import package would break existing Python callers; only the distribution name
-needs to change. The skill bundle also had a YAML list for `allowed-tools`, a
+**Why:** the short project name was already taken by an unrelated project on
+the package index, so that name cannot identify this project. The package had
+not been published yet, which made a full rename cheap: keeping the old import
+package would leave a permanent split between the brand, the distribution and
+the code. The skill bundle also had a YAML list for `allowed-tools`, a
 hard-coded author path in `mcp_config.json`, and no packaging tests.
 
-**Consequences:** installation instructions use `mnemo-local-memory`; existing
-imports (`from mnemo import Mnemo`) and `python -m mnemo.server` keep working.
-The skill source is tracked in git and the ZIP is rebuilt from it. The
-frontmatter uses the space-separated `allowed-tools` form, and the MCP config
-launches `mnemo-server` with a portable data directory.
+**Consequences:** installation uses `pip install mnemolite`, imports use
+`from mnemolite import Mnemolite`, and the server starts with
+`mnemolite-server`. The skill source is tracked; the ZIP is built from it and
+never committed. The frontmatter uses the space-separated `allowed-tools` form,
+and the MCP config launches `mnemolite-server` with a portable data directory.
 
 

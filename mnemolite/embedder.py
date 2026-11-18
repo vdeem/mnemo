@@ -7,7 +7,7 @@ from sentence_transformers import SentenceTransformer
 log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = os.getenv(
-    "MNEMO_EMBED_MODEL", "intfloat/multilingual-e5-small"
+    "MNEMOLITE_EMBED_MODEL", "intfloat/multilingual-e5-small"
 )
 
 
@@ -30,10 +30,10 @@ class Embedder:
         self.model = SentenceTransformer(self.model_name)
         self.client = chromadb.PersistentClient(path=db_path)
         # Vectors from different models must never share a collection. The slug
-        # keeps them apart, so switching MNEMO_EMBED_MODEL is safe: the new
+        # keeps them apart, so switching MNEMOLITE_EMBED_MODEL is safe: the new
         # collection is backfilled from SQLite instead of mixing dimensions.
         self.collection = self.client.get_or_create_collection(
-            name=f"mnemo_episodes_{_slug(self.model_name)}"
+            name=f"mnemolite_episodes_{_slug(self.model_name)}"
         )
 
     def _warn_if_truncated(self, documents: list[str]) -> None:

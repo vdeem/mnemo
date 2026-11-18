@@ -4,7 +4,7 @@ import math
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from mnemo.db import Database, parse_utc
+from mnemolite.db import Database, parse_utc
 
 
 def test_add_episode_is_idempotent(db):

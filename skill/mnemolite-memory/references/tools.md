@@ -1,19 +1,19 @@
-# Mnemo MCP tools — reference
+# Mnemolite MCP tools — reference
 
-The Mnemo MCP server exposes five tools over stdio. All calls are synchronous
+The Mnemolite MCP server exposes five tools over stdio. All calls are synchronous
 from the client's point of view; the server runs the blocking engine work in a
 worker thread.
 
 ## Connection
 
-- Command: `mnemo-server` after `pip install mnemo-local-memory` (or
-  `python -m mnemo.server` from an editable checkout).
+- Command: `mnemolite-server` after `pip install mnemolite` (or
+  `python -m mnemolite.server` from an editable checkout).
 - Store location:
-  - `MNEMO_DATA_DIR` — base directory for the default database and vectors.
-  - `MNEMO_DB_PATH` — explicit SQLite path.
-  - `MNEMO_CHROMA_PATH` — explicit Chroma directory.
+  - `MNEMOLITE_DATA_DIR` — base directory for the default database and vectors.
+  - `MNEMOLITE_DB_PATH` — explicit SQLite path.
+  - `MNEMOLITE_CHROMA_PATH` — explicit Chroma directory.
   - Defaults: the checkout root when running from a checkout, otherwise
-    `~/.mnemo`.
+    `~/.mnemolite`.
 - No external LLM API is called; spaCy and sentence-transformers run locally.
 
 ## `add_memory`
@@ -148,7 +148,7 @@ of a plain success string. Typical messages:
 - `Error saving memory: text must not be empty`
 - `Error saving memory: metadata must be a JSON object`
 - `Error recalling memory: ...`
-- `Mnemo store is not available in this request`
+- `Mnemolite store is not available in this request`
 
 Do not retry a failing call in a loop. Fix the argument once, then report the
 failure.
@@ -157,9 +157,9 @@ failure.
 
 | Variable | Purpose |
 | --- | --- |
-| `MNEMO_DATA_DIR` | Base directory for the default DB and Chroma store. |
-| `MNEMO_DB_PATH` | Explicit SQLite file path. |
-| `MNEMO_CHROMA_PATH` | Explicit Chroma directory. |
-| `MNEMO_MAX_DISTANCE` | Default recall cutoff, if the tool argument is omitted. |
-| `MNEMO_EMBED_MODEL` | Embedding model override (advanced; invalidates vectors). |
-| `MNEMO_RECALL_PRESET` | `balanced` or `emotional` ranking preset. |
+| `MNEMOLITE_DATA_DIR` | Base directory for the default DB and Chroma store. |
+| `MNEMOLITE_DB_PATH` | Explicit SQLite file path. |
+| `MNEMOLITE_CHROMA_PATH` | Explicit Chroma directory. |
+| `MNEMOLITE_MAX_DISTANCE` | Default recall cutoff, if the tool argument is omitted. |
+| `MNEMOLITE_EMBED_MODEL` | Embedding model override (advanced; invalidates vectors). |
+| `MNEMOLITE_RECALL_PRESET` | `balanced` or `emotional` ranking preset. |

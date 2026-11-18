@@ -56,7 +56,7 @@ def render_brief(db: Database, top_n: int = 30) -> str:
         for node in concepts
         if node.get("last_seen")
     ]
-    blocks = ["# Mnemo Brief"]
+    blocks = ["# Mnemolite Brief"]
     if stamps:
         blocks.append(f"_Generated: {max(stamps).isoformat()}_")
     if recent:

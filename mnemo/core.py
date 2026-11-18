@@ -167,7 +167,9 @@ class Mnemo:
         all according to ``self.weights`` (``RecallWeights``), so a deployment
         can trade semantic precision for emotional salience. Episodes farther
         than max_distance are dropped entirely, so "nothing relevant" is a
-        normal, honest answer instead of noise.
+        normal, honest answer instead of noise. Typed graph facts are returned
+        independently of the vector cutoff: a query entity can have a fact
+        even when no episode is close enough.
         """
         if max_distance is None:
             max_distance = float(
@@ -175,8 +177,6 @@ class Mnemo:
             )
 
         raw_episodes = self.embedder.search(query, k=max(k * 3, k))
-        if not raw_episodes:
-            return {"episodes": [], "facts": []}
 
         details = self.db.get_episode_details([ep["id"] for ep in raw_episodes])
         now = datetime.now(timezone.utc)
@@ -226,24 +226,22 @@ class Mnemo:
             scored["score"] = round(score, 4)
             scored_episodes.append(scored)
 
-        if not scored_episodes:
-            return {"episodes": [], "facts": []}
-
         scored_episodes.sort(key=lambda e: e["score"], reverse=True)
         top_episodes = scored_episodes[:k]
 
         # Graph search (spreading activation) over entities in the query. The
         # query extractor keeps generic nouns such as "user" so a user-centric
         # question can traverse the graph; concept extraction still filters
-        # them for co-occurrence and the brief. The same edge is returned for
-        # each endpoint (and co_occurs is the noisy implicit mesh, not a fact),
-        # so merge by (source, relation, target) and keep the strongest copy.
+        # them for co-occurrence and the brief. co_occurs is filtered in SQL
+        # before the row limit, so the implicit mesh cannot crowd out typed
+        # facts. The same edge is returned for each endpoint, so merge by
+        # (source, relation, target) and keep the strongest copy.
         query_entities = self.consolidator.extract_query_entities(query)
         facts_by_key: dict[tuple[str, str, str], dict] = {}
         for entity in query_entities:
-            for fact in self.db.get_graph_context(entity):
-                if fact["relation"] == "co_occurs":
-                    continue
+            for fact in self.db.get_graph_context(
+                entity, exclude_relations=("co_occurs",)
+            ):
                 key = (fact["source"], fact["relation"], fact["target"])
                 previous = facts_by_key.get(key)
                 if previous is None or fact["weight"] > previous["weight"]:

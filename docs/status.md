@@ -48,6 +48,16 @@ Legacy edges are initialized without double-decaying them. Regression tests
 cover decay-then-delete, repeated decay and the legacy-column migration;
 ADR-015 records the decision.
 
+### 4. Typed facts no longer depend on vector hits
+
+`recall()` now builds its typed graph projection even when the vector search
+returns nothing or every candidate fails `max_distance`. `get_graph_context()`
+also filters excluded relations in SQL *before* the row limit, so a high-weight
+`co_occurs` mesh cannot crowd typed facts out of the 20-row window. Regression
+tests cover relation filtering before the limit, facts with an empty vector
+index, facts when all episodes miss the cutoff, and facts alongside a large
+co-occurrence mesh; ADR-016 records the decision.
+
 ## Previous hardening session (2026-11-14)
 
 ### 1. Tests run in sandboxed Windows (`dca7990`)
@@ -160,10 +170,11 @@ suite on Python 3.10-3.12.
 
 - CI: `.github/workflows/tests.yml` runs the suite on Python 3.10-3.12;
   runtime deps are bounded in `pyproject.toml` and `requirements.txt`.
-- Tests: **91 passed** (`pytest -q`), including new coverage for exact-only
+- Tests: **95 passed** (`pytest -q`), including new coverage for exact-only
   dedupe, near-duplicate corrections, generic query subjects, incremental
-  decay, proportional deletion after decay and the legacy decay-column
-  migration, orphan-vector pruning, re-add durability, shared-edge deletion,
+  decay, proportional deletion after decay, the legacy decay-column migration,
+  typed facts independent of the vector cutoff, relation filtering before the
+  graph LIMIT, orphan-vector pruning, re-add durability, shared-edge deletion,
   provenance cascade on decay, a simulated mid-pass consolidation crash,
   negation, lemmatized endpoints, coordinated verbs, nested entities, fact
   deduplication/capping, the content index, undirected `co_occurs`, decay node

@@ -32,6 +32,27 @@ def test_reinforce_edge_increments_weight(db):
     assert facts[0]["weight"] == 2.0
 
 
+def test_get_graph_context_excludes_relations_before_limit(db):
+    """The co_occurs mesh must not push typed facts out of the LIMIT."""
+    alice = db.get_or_create_node("alice")
+    bob = db.get_or_create_node("bob")
+    db.reinforce_edge(alice, bob, relation="knows")
+
+    for index in range(25):
+        target = db.get_or_create_node(f"concept {index}")
+        db.reinforce_edge(alice, target, relation="co_occurs")
+        db.reinforce_edge(alice, target, relation="co_occurs")
+
+    unfiltered = db.get_graph_context("alice")
+    assert len(unfiltered) == 20
+    assert all(fact["relation"] == "co_occurs" for fact in unfiltered)
+
+    filtered = db.get_graph_context("alice", exclude_relations=("co_occurs",))
+    assert [
+        (fact["source"], fact["relation"], fact["target"]) for fact in filtered
+    ] == [("alice", "knows", "bob")]
+
+
 def test_get_or_create_node_stores_display_name(db, tmp_db_path):
     db.get_or_create_node("jack", "PERSON", display_name="Jack")
 

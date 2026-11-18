@@ -244,6 +244,66 @@ def test_recall_finds_user_graph_facts(mnemo):
     assert ("user", "like", "coffee") in keys
 
 
+def test_recall_returns_typed_facts_without_episode_matches(mnemo, monkeypatch):
+    """Graph facts are independent of the vector index and its co_occurs mesh."""
+    mnemo.add("Alice knows Bob.")
+    mnemo.consolidate(write_brief=False)
+
+    alice = mnemo.db.get_or_create_node("alice")
+    for index in range(25):
+        target = mnemo.db.get_or_create_node(f"concept {index}")
+        mnemo.db.reinforce_edge(alice, target, relation="co_occurs")
+        mnemo.db.reinforce_edge(alice, target, relation="co_occurs")
+
+    monkeypatch.setattr(
+        mnemo.embedder, "search", lambda query, k=5: []
+    )
+
+    result = mnemo.recall("Alice")
+    keys = {(fact["source"], fact["relation"], fact["target"]) for fact in result["facts"]}
+
+    assert result["episodes"] == []
+    assert ("alice", "know", "bob") in keys
+
+
+def test_recall_returns_facts_when_episodes_miss_cutoff(mnemo, monkeypatch):
+    ep_id = mnemo.add("Alice knows Bob.")
+    mnemo.consolidate(write_brief=False)
+
+    monkeypatch.setattr(
+        mnemo.embedder,
+        "search",
+        lambda query, k=5: [
+            {
+                "id": ep_id,
+                "text": "Alice knows Bob.",
+                "distance": 1.9,
+            }
+        ],
+    )
+
+    result = mnemo.recall("Alice")
+    keys = {(fact["source"], fact["relation"], fact["target"]) for fact in result["facts"]}
+
+    assert result["episodes"] == []
+    assert ("alice", "know", "bob") in keys
+
+
+def test_recall_returns_facts_when_vector_index_is_empty(mnemo, monkeypatch):
+    mnemo.add("Alice knows Bob.")
+    mnemo.consolidate(write_brief=False)
+
+    monkeypatch.setattr(
+        mnemo.embedder, "search", lambda query, k=5: []
+    )
+
+    result = mnemo.recall("Alice")
+    keys = {(fact["source"], fact["relation"], fact["target"]) for fact in result["facts"]}
+
+    assert result["episodes"] == []
+    assert ("alice", "know", "bob") in keys
+
+
 def test_recall_facts_are_deduplicated(mnemo):
     mnemo.add("Alice knows Bob.")
     mnemo.consolidate()

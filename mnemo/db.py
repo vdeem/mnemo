@@ -431,18 +431,35 @@ class Database:
             )
         return edge_id
 
-    def get_graph_context(self, node_name: str, depth=1) -> list:
-        """Returns the node’s connections in the graph."""
+    def get_graph_context(self, node_name: str, depth=1,
+                          exclude_relations: tuple[str, ...] = ()) -> list:
+        """Return the node's connections in the graph.
+
+        ``exclude_relations`` is applied in SQL *before* the row limit, so a
+        high-weight ``co_occurs`` mesh cannot crowd typed facts out of the
+        result. The default keeps every relation for callers that want the
+        complete neighbourhood.
+        """
         node_name = node_name.lower().strip()
+        params: list = [node_name, node_name]
+        where = "(n1.name = ? OR n2.name = ?)"
+        if exclude_relations:
+            placeholders = ",".join("?" * len(exclude_relations))
+            where += f" AND e.relation NOT IN ({placeholders})"
+            params.extend(exclude_relations)
+
         with self._conn() as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                f"""
                 SELECT DISTINCT n1.name, e.relation, n2.name, e.weight
                 FROM edges e
                 JOIN nodes n1 ON e.source_id = n1.id
                 JOIN nodes n2 ON e.target_id = n2.id
-                WHERE n1.name = ? OR n2.name = ?
+                WHERE {where}
                 ORDER BY e.weight DESC LIMIT 20
-            """, (node_name, node_name))
+                """,
+                params,
+            )
             return [
                 {"source": row[0], "relation": row[1], "target": row[2], "weight": row[3]} 
                 for row in cursor.fetchall()

@@ -272,4 +272,22 @@ migration does not decay an already-decayed value twice. Edges without
 provenance remain untouched by deletion. The archive keeps only the original
 edge columns and receives an explicit column list.
 
+## ADR-016 — typed facts are independent of vector recall
+
+**Decision:** `recall()` computes the typed graph projection even when the
+vector search returns no episodes or every candidate fails `max_distance`.
+`get_graph_context()` accepts `exclude_relations` and applies it in SQL before
+the row limit; recall excludes `co_occurs` there.
+
+**Why:** `co_occurs` weights can exceed typed triples, so filtering after the
+`LIMIT 20` let the implicit mesh crowd real facts out. Separately, early
+returns for an empty or fully filtered vector result discarded graph facts that
+the query entity already had, which contradicts the hybrid-retrieval contract.
+
+**Consequences:** a query can return facts with an empty `episodes` list; facts
+remain deduplicated, weight-sorted and capped at `MAX_RECALL_FACTS`.
+`get_graph_context()` keeps its complete-neighbourhood default for callers that
+need `co_occurs`; only recall opts into the typed view. The agent brief is
+unchanged because it already filters `co_occurs` through its own queries.
+
 
